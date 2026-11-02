@@ -162,12 +162,14 @@ static uint8_t rg_ysave;
 #endif
 
 /* The 32-entry bank-walk table at $BA8F. */
+#ifndef RIVER_2600
 static const uint8_t river_walk[32] = {
     0x00, 0x01, 0xFF, 0xFF, 0x00, 0x01, 0x00, 0x00,
     0x01, 0x00, 0x01, 0xFF, 0x00, 0xFF, 0xFF, 0xFF,
     0x00, 0x01, 0x01, 0x00, 0x01, 0xFF, 0xFF, 0x00,
     0x00, 0xFF, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00,
 };
+#endif
 
 /* Initial values copied from $BAE1 to $4D-$5F. */
 static const uint8_t river_defaults[19] = {
@@ -599,6 +601,7 @@ static void river_fill(uint8_t y, uint8_t value) {
 /* NES recolour: Atari pixel value 2 (outline, near black) becomes value 0
  * (black backdrop) on bank edges, so value 2 is free for the hills' brown.
  * nes_edge_black() in tools/river_model.py, for every byte. */
+#ifndef RIVER_NOFEAT
 static const uint8_t river_black_lut[256] = {
     0x00, 0x01, 0x00, 0x03, 0x04, 0x05, 0x04, 0x07, 0x00, 0x01, 0x00, 0x03, 0x0C, 0x0D, 0x0C, 0x0F,
     0x10, 0x11, 0x10, 0x13, 0x14, 0x15, 0x14, 0x17, 0x10, 0x11, 0x10, 0x13, 0x1C, 0x1D, 0x1C, 0x1F,
@@ -617,6 +620,7 @@ static const uint8_t river_black_lut[256] = {
     0xC0, 0xC1, 0xC0, 0xC3, 0xC4, 0xC5, 0xC4, 0xC7, 0xC0, 0xC1, 0xC0, 0xC3, 0xCC, 0xCD, 0xCC, 0xCF,
     0xF0, 0xF1, 0xF0, 0xF3, 0xF4, 0xF5, 0xF4, 0xF7, 0xF0, 0xF1, 0xF0, 0xF3, 0xFC, 0xFD, 0xFC, 0xFF
 };
+#endif
 
 static const uint8_t *rt_src;
 static uint8_t *rt_dst;
@@ -675,6 +679,8 @@ static void river_copy_template(void) {
     rg_row_pos = (uint8_t)(rg_row_pos + rg_bc);
     rg_tpl_off = (uint16_t)(rg_tpl_off + rg_bc);
 }
+#elif defined(RIVER_NOFEAT)
+#define river_copy_template()   ((void)0)    /* no decoration is drawn */
 #else
 static void river_copy_template(void) {
     uint8_t i;
@@ -1084,7 +1090,12 @@ static void river_render_row(void) {
     river_pattern((uint8_t)((x & 3u) * 4u));
 
     /* --- island / right bank ----------------------------------------- */
-    a = island ? rg_width : RIVER_Q(rg_width);
+    a = rg_width;
+#ifdef RIVER_BLOCKY
+    if (!island) {
+        a = RIVER_Q(a);
+    }
+#endif
     if (island) {
         if (rg_phase < 6u) {
             a = (uint8_t)(rg_width + rg_phase + rg_phase);
@@ -2291,13 +2302,22 @@ static uint8_t af_next;                 /* atlas slots used */
 static int16_t af_j1, af_j2;            /* jumps of the pending band's edge (set per side) */
 static int16_t af_jL1, af_jL2, af_jR1, af_jR2;
 static uint8_t rj_fast;                 /* the pending tile row takes the fast path */
-uint16_t river_fast_bands;              /* tile rows done by the fast path / by the exact path (profiling) */
+static uint8_t rj_same;                 /* ... and equals the last one: river_row_ids still holds its ids */
+static int8_t af_sig[6];                /* signature of the last fast band: L0, R0, jumps */
+static uint8_t af_sig_ok;               /* river_row_ids holds that band's ids */
+#ifdef RIVER_STATS                      /* host check and profiling only: it costs bank 0 bytes */
+uint16_t river_fast_bands;              /* tile rows done by the fast path / by the exact path */
 uint16_t river_slow_bands;
 uint16_t river_slow_why[3];             /* ... because: a row was not plain / odd edge shape / atlas full */
+#define RIVER_STAT(x)   (x)
+#else
+#define RIVER_STAT(x)   ((void)0)
+#endif
 static uint8_t af_side, af_k, af_xv;
 static int16_t af_x;                    /* x of the edge in the atlas column, row 0 */
 static uint8_t af_sv_left, af_sv_phase, af_sv_width, af_sv_rl, af_sv_rr;
-static int16_t af_lo, af_hi, af_lmin, af_lmax, af_rmin, af_rmax;
+static int16_t af_lmin, af_lmax, af_rmin, af_rmax;
+static uint8_t af_cl0, af_cl1, af_cr0, af_cr1;   /* tile columns the left / right edge touches */
 
 /* Render and convert the recorded rows exactly, as the plain renderer would
  * have.  Saves and restores the generator fields the renderer reads. */
@@ -2326,38 +2346,49 @@ static void river_band_replay(void) {
     rs_isl = 0xFFu;
 }
 
-/* Build one atlas tile into river_tile_pat[rj_c]: eight synthetic rows with a
- * single edge at af_x (+ af_j1 from row 3, + af_j2 from row 7), rendered and
- * converted by the exact code. */
+/* One raw byte (2 bytes make an 8-pixel tile line) of a lone edge.  The renderer's plain
+ * row is: land fill, the left edge's 2 pattern bytes, water fill, the right edge's 2
+ * pattern bytes, land fill; the fills overlap the next pattern by one byte (river_fill).
+ * ab_pos is the edge's first pattern byte, ab_idx its pattern index (river_bank_black). */
+static uint8_t ab_pos, ab_idx;
+static uint8_t river_edge_byte(uint8_t b) {
+    if (b < ab_pos) {
+        return af_side ? 0xFFu : 0x55u;
+    }
+    if (b == ab_pos) {
+        return river_bank_black[ab_idx];
+    }
+    if (b == (uint8_t)(ab_pos + 1u)) {
+        return river_bank_black[(uint8_t)(ab_idx + 1u)];
+    }
+    return af_side ? 0x55u : 0xFFu;
+}
+
+/* Build one atlas tile into river_tile_pat[rj_c], straight from the edge: eight lines with a single
+ * edge at af_x (+ af_j1 from line 3, + af_j2 from line 7), in the exact renderer's raw bytes and
+ * conversion (tests/host_river_fast.ps1 compares it with the exact path).  The tile is column
+ * AF_TILE_COL of the synthetic row, bytes 6 and 7. */
+static uint8_t ab_b0, ab_b1;
 static void river_atlas_build(void) {
-    af_sv_left = rg_left;
-    af_sv_phase = rg_phase;
-    af_sv_width = rg_width;
-    af_sv_rl = rg_row_left;
-    af_sv_rr = rg_row_right;
-    rg_phase = 0u;
+    uint8_t *dst = &river_tile_pat[(uint16_t)rj_c * 16u];
+
     for (af_k = 0; af_k < 8u; af_k++) {
         af_xv = (uint8_t)(af_x + ((af_k >= 3u) ? af_j1 : 0) + ((af_k >= 7u) ? af_j2 : 0));
         if (af_side == 0u) {
-            rg_left = af_xv;                /* left edge here, right edge far away */
-            rg_width = 100u;
+            ab_pos = (uint8_t)(af_xv >> 2);
+            if (ab_pos) {
+                ab_pos--;                       /* the land fill's last byte is the pattern's */
+            }
+            ab_idx = (uint8_t)((af_xv & 3u) * 4u);
         } else {
-            rg_left = 0u;                   /* left edge off the picture */
-            rg_width = af_xv;
+            ab_pos = (uint8_t)(af_xv >> 2);
+            ab_idx = (uint8_t)((af_xv & 3u) * 4u + 2u);
         }
-        river_render_row();
-        river_convert_row((uint8_t)(7u - af_k));
+        ab_b0 = river_edge_byte(2u * AF_TILE_COL);
+        ab_b1 = river_edge_byte(2u * AF_TILE_COL + 1u);
+        dst[(uint8_t)((7u - af_k) * 2u)] = (uint8_t)((river_lut_p0[ab_b0] << 4) | river_lut_p0[ab_b1]);
+        dst[(uint8_t)((7u - af_k) * 2u + 1u)] = (uint8_t)((river_lut_p1[ab_b0] << 4) | river_lut_p1[ab_b1]);
     }
-    if (rj_c != AF_TILE_COL) {
-        memcpy(&river_tile_pat[(uint16_t)rj_c * 16u], &river_tile_pat[(uint16_t)AF_TILE_COL * 16u], 16u);
-    }
-    river_reset_kinds();
-    rg_left = af_sv_left;
-    rg_phase = af_sv_phase;
-    rg_width = af_sv_width;
-    rg_row_left = af_sv_rl;
-    rg_row_right = af_sv_rr;
-    rs_isl = 0xFFu;
 }
 
 /* Jumps of one recorded edge (rows 3 and 7), or 0 when it moves anywhere else or by more than a
@@ -2401,38 +2432,42 @@ static uint8_t river_band_regular(void) {
     }
     /* No tile column may be touched by both edges (river_fast_cols tests the left
      * one first), and rows may not wrap. */
-    return (uint8_t)(((af_lmax + AF_AFTER) >> 3) < ((af_rmin - AF_BEFORE) >> 3) && af_rmax < 250);
+    if (((af_lmax + AF_AFTER) >> 3) >= ((af_rmin - AF_BEFORE) >> 3) || af_rmax >= 250) {
+        return 0u;
+    }
+    af_cl0 = (af_lmin - AF_BEFORE <= 0) ? 0u : (uint8_t)((af_lmin - AF_BEFORE) >> 3);
+    af_cl1 = (uint8_t)((af_lmax + AF_AFTER) >> 3);
+    af_cr0 = (af_rmin - AF_BEFORE <= 0) ? 0u : (uint8_t)((af_rmin - AF_BEFORE) >> 3);
+    af_cr1 = (uint8_t)((af_rmax + AF_AFTER) >> 3);
+    return 1u;
 }
 
 /* Fill river_row_ids for the columns from river_job_col on.  0 when it has to
  * yield (budget spent or transfer buffer full); it resumes at the same column. */
 static uint8_t river_fast_cols(void) {
     int16_t dl;
-    uint8_t touched;
     uint8_t *slot;
 
     while (river_job_col < RIVER_TILE_COLS) {
         rj_c = river_job_col;
-        af_lo = (int16_t)rj_c * 8;
-        af_hi = af_lo + 7;
-        touched = 0u;
-        if (af_lo <= af_lmax + AF_AFTER && af_hi >= af_lmin - AF_BEFORE) {
+        if (rj_c < af_cl0) {
+            river_row_ids[rj_c] = TILE_LAND;
+        } else if (rj_c <= af_cl1) {
             af_side = 0u;
             af_j1 = af_jL1;
             af_j2 = af_jL2;
-            dl = (int16_t)rb_L[0] - af_lo;
-            touched = 1u;
-        } else if (af_lo <= af_rmax + AF_AFTER && af_hi >= af_rmin - AF_BEFORE) {
+            dl = (int16_t)rb_L[0] - (int16_t)rj_c * 8;
+        } else if (rj_c < af_cr0) {
+            river_row_ids[rj_c] = TILE_WATER;
+        } else if (rj_c <= af_cr1) {
             af_side = 1u;
             af_j1 = af_jR1;
             af_j2 = af_jR2;
-            dl = (int16_t)rb_R[0] - af_lo;
-            touched = 1u;
-        }
-        if (!touched) {
-            river_row_ids[rj_c] = (af_hi < af_lmin - AF_BEFORE || af_lo > af_rmax + AF_AFTER)
-                ? TILE_LAND : TILE_WATER;
+            dl = (int16_t)rb_R[0] - (int16_t)rj_c * 8;
         } else {
+            river_row_ids[rj_c] = TILE_LAND;
+        }
+        if ((rj_c >= af_cl0 && rj_c <= af_cl1) || (rj_c >= af_cr0 && rj_c <= af_cr1)) {
             slot = &af_id[af_side][(af_j1 / (int16_t)RIVER_GRID) + 2][(af_j2 / (int16_t)RIVER_GRID) + 2]
                          [(dl - AF_DL_MIN) >> AF_SHIFT];
             rj_id = *slot;
@@ -2461,9 +2496,10 @@ static uint8_t river_fast_cols(void) {
 static void river_run_job(void) {
 #ifdef RIVER_FAST
     if (rj_fast) {
-        if (!river_fast_cols()) {
+        if (!rj_same && !river_fast_cols()) {
             return;
         }
+        af_sig_ok = 1u;
     } else
 #endif
     for (;;) {
@@ -2600,6 +2636,7 @@ static void river_generate_raw_row(void) {
             ((rg_island_flags & 0x80u) ? RIVER_FLAG_ISLAND : 0u) |
             (rg_feature ? RIVER_FLAG_FEATURE : 0u));
     }
+#if !(defined(RIVER_FAST) && defined(__SDCC_sm83))      /* bank 0 is full in the 2600 GBC build */
     if (river_block_index == 7u) {
         river_debug_state[0] = rg_left;
         river_debug_state[1] = rg_width;
@@ -2620,6 +2657,7 @@ static void river_generate_raw_row(void) {
         river_debug_state[15] = (uint8_t)(rg_tpl_off & 0xFF);
 #endif
     }
+#endif
     river_block_index++;
 }
 
@@ -2634,6 +2672,8 @@ static void river_finish_tile_row(void) {
     }
 #ifdef RIVER_FAST
     rj_fast = 0u;
+    rj_same = 0u;
+#ifdef RIVER_STATS
     if (rb_mask != 0xFFu) {
         river_slow_why[0]++;
     } else if ((uint8_t)(af_next + 8u) > RIVER_ATLAS_N) {
@@ -2641,12 +2681,27 @@ static void river_finish_tile_row(void) {
     } else if (!river_band_regular()) {
         river_slow_why[1]++;
     }
+#endif
     if (rb_mask == 0xFFu && (uint8_t)(af_next + 8u) <= RIVER_ATLAS_N && river_band_regular()) {
         rj_fast = 1u;
         rb_mask = 0u;
-        river_fast_bands++;
+        RIVER_STAT(river_fast_bands++);
+        /* A straight stretch repeats the same band: its ids are still in river_row_ids. */
+        rj_same = (uint8_t)(af_sig_ok && af_sig[0] == (int8_t)rb_L[0] && af_sig[1] == (int8_t)rb_R[0] &&
+                            af_sig[2] == (int8_t)af_jL1 && af_sig[3] == (int8_t)af_jL2 &&
+                            af_sig[4] == (int8_t)af_jR1 && af_sig[5] == (int8_t)af_jR2);
+        af_sig[0] = (int8_t)rb_L[0];
+        af_sig[1] = (int8_t)rb_R[0];
+        af_sig[2] = (int8_t)af_jL1;
+        af_sig[3] = (int8_t)af_jL2;
+        af_sig[4] = (int8_t)af_jR1;
+        af_sig[5] = (int8_t)af_jR2;
+        if (!rj_same) {
+            af_sig_ok = 0u;                 /* set again once the ids are written */
+        }
     } else {
-        river_slow_bands++;
+        RIVER_STAT(river_slow_bands++);
+        af_sig_ok = 0u;                     /* an exact job rewrites river_row_ids */
         if (rb_mask) {
             river_band_replay();
         }
@@ -2687,6 +2742,7 @@ static void river_start(uint8_t restart, uint8_t bridges) {
 #ifdef RIVER_FAST
     memset(af_id, 0, sizeof(af_id));    /* the atlas is rebuilt on demand */
     af_next = 0u;
+    af_sig_ok = 0u;
     rb_mask = 0u;
     rj_fast = 0u;
     river_alloc = RIVER_RING_FIRST;

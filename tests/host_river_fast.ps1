@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $out = Join-Path $env:TEMP 'river_host_fast'
 New-Item -ItemType Directory -Force $out | Out-Null
-$base = @('-std=c11', '-O1', '-w', '-DRIVER_NO_START_ROAD', '-DRIVER_JOB_COLS=255', '-DRIVER_BLOCKY', '-DRIVER_HOST_DIRECT')
+$base = @('-std=c11', '-O1', '-w', '-DRIVER_NO_START_ROAD', '-DRIVER_JOB_COLS=255', '-DRIVER_BLOCKY', '-DRIVER_HOST_DIRECT', '-DRIVER_STATS')
 if (-not $Features) { $base += '-DRIVER_NOFEAT' }
 $inc = @("-I$PSScriptRoot/host", "-I$root/src", '-include', 'stdlib.h')
 $src = @("$PSScriptRoot/host/tiles_main.c", "$root/src/river.c", "$root/src/atari_data.c")
@@ -24,6 +24,7 @@ foreach ($variant in 0..3) {
     }
     Write-Host "variant ${variant}: identical ($((Get-Content "$out/exact.txt").Count) lines)"
 }
+
 
 
 

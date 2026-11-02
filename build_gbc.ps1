@@ -21,6 +21,7 @@ param(
     [switch]$ProfExport,
     [switch]$OamCheck,
     [switch]$River2600,         # 2600 river: -DRIVER_BLOCKY -DRIVER_NOFEAT -DRIVER_FAST (docs/MOD_2600_SPEC.md)
+    [switch]$DmgProxy,          # no cpu_fast(): the DMG CPU proxy (proposal row 8)
     [string[]]$Define = @()     # extra -D flags, e.g. RIVER_GRID=4
 )
 
@@ -48,6 +49,7 @@ foreach ($src in $Sources) {
     if ($ProfExport) { $a += '-DPROF_EXPORT_STATICS' }
     if ($OamCheck) { $a += '-DPROF_OAMCHECK' }
     if ($River2600) { $a += '-DRIVER_BLOCKY', '-DRIVER_NOFEAT', '-DRIVER_FAST' }
+    if ($DmgProxy) { $a += '-DDMG_PROXY' }
     foreach ($d in $Define) { $a += "-D$d" }
     # Game logic writes sprites in NES coordinates into gbc_logic_oam; only
     # gbc/main.c sees the real shadow_OAM and translates (camera, +16/+8).

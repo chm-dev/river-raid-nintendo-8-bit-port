@@ -295,7 +295,9 @@ void main(void) {
     if (_cpu != CGB_TYPE) {
         gbc_required();
     }
+#ifndef DMG_PROXY                       /* build_gbc.ps1 -DmgProxy: stay at the DMG clock (single speed) */
     cpu_fast();
+#endif
 
     DISPLAY_OFF;
     set_bkg_palette(0, GBC_RIVER_PALS, &bkg_palette[0][0]);
