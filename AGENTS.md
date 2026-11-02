@@ -21,7 +21,7 @@ Port of the Atari 8-bit **River Raid** (`xex/River Raid (1983)(Activision)(US)[a
 ## Toolchain & build (`./gbdk`)
 - **Compile:** `gbdk/bin/lcc.exe -msm83:gb -Isrc` (SDCC `sm83` backend). `-Wf-bo1` for `entities` and `entity_gfx`.
 - **Link:** `-Wl-j -Wl-m -Wl-yt0x19 -Wl-yo4` (MBC5, 4 banks). Always pass `-Wl-j` so `.noi` symbols are generated. `-DPROF_EXPORT_STATICS` exposes statics to the profiler.
-- **No GBC build script yet.** `build.ps1` is the NES build and no longer builds the NES ROM on this branch. Milestone 1 adds the GBC build and its checks.
+- **Two builds, one tree.** `.\build_gbc.ps1` builds the GBC ROM (`roms/river_raid.gb`); `.\build.ps1` builds the NES ROM (`roms/river_raid.nes`). Both write `roms/river_raid.noi` and `.map`, so rebuild the one you are testing last. Shared files pick the SDK header through `src/platform.h` and branch on `__SDCC_sm83`; never include `<gb/gb.h>` or `<nes/nes.h>` directly in shared files. NES RAM has ~3 bytes free: GBC-only globals and `#define` hacks must sit inside `#ifdef __SDCC_sm83`. After touching a shared file, build both.
 - **Asset conversion:** `./gbdk/bin/png2asset`, `./gbdk/bin/gbcompress`, and `tools/gen_entity_gfx.py` (it needs GBC palette output).
 
 ### GBC / SDCC rules

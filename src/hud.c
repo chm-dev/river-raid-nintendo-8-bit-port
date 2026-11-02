@@ -37,7 +37,7 @@
  * display is off those calls write VRAM directly, and once it is on they go
  * through the NMI transfer buffer.
  */
-#include <gb/gb.h>
+#include "platform.h"
 #include <stdint.h>
 #include <string.h>
 

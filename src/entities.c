@@ -7,15 +7,15 @@
  * frames and turn at the banks.  Types, shapes and scores come from the
  * extracted Atari tables.
  */
-#include <gb/gb.h>
+#include "platform.h"
 #ifdef __SDCC_sm83
 #include <gb/cgb.h>
-#endif
 #define palette_color_t uint16_t
 #undef set_bkg_palette_entry
 #define set_bkg_palette_entry(p,i,c)
 #undef set_sprite_palette
 #define set_sprite_palette(a,b,c)
+#endif
 #include <stdint.h>
 
 #include "config.h"

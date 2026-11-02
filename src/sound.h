@@ -12,7 +12,7 @@
 /* The GBC engine lives in its own ROM bank (gbc/sound_gbc.c); the NES one is
  * plain code. */
 #ifdef __SDCC_sm83
-#include <gb/gb.h>
+#include "platform.h"
 #define SND_BANKED BANKED
 #else
 #define SND_BANKED

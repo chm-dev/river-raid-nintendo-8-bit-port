@@ -2,14 +2,14 @@
 
 Short, current, rewritten every session. Rules are in `AGENTS.md`; the plan is `GBC_PORT_PLAN.md`; history is `PROGRESS.md` (grep it, do not read whole).
 
-**Last updated:** 2026-11-01 · **Branch:** `gbc-port` · **Phase:** milestone 2 passed and the user said go. 2-player mode is removed (play-tested). Sound is ported and play-tested. HUD rework done (awaiting play-test confirmation). Next: optional pacing work (step 5), then milestone 5
+**Last updated:** 2026-11-01 · **Branch:** `main` (gbc-port merged) · **Phase:** milestone 2 passed and the user said go. 2-player mode is removed (play-tested). Sound is ported and play-tested. HUD rework done (awaiting play-test confirmation). Next: optional pacing work (step 5), then milestone 5
 
 ## Where we are
 
 - The port is GBC-only. The C prototype comes first, then a playtest go/no-go after milestone 2.
 - **Build:** `.\build_gbc.ps1` → `roms/river_raid.gb`, the only GB ROM; delete old trial ROMs rather than keeping versions. It checks the header (`$0143=$C0`, MBC5, 4 banks, checksum), every `.map` area against its bank window, and `.noi` symbols.
 - **Banks:** player.c is in bank 2 (`-Wf-bo2`, set in `build_gbc.ps1`), entities in bank 1. Bank 0 code ends at `$33D6` (~3.1 KB free). Sound is in bank 3 ($4000-$44DB, ~1.2 KB of 16 KB used). Keep `BANKED` on banked public APIs.
-- **GBC code lives in `src/gbc/`** (`main.c`, `config_gbc.h`, `hud_gbc.c`, `sound_gbc.c`). Shared files carry `#ifdef __SDCC_sm83` branches next to the NES code, never replacements, so the milestone 5 merge stays cheap. `build.ps1` is still the NES build.
+- **GBC code lives in `src/gbc/`** (`main.c`, `config_gbc.h`, `hud_gbc.c`, `sound_gbc.c`). Shared files carry `#ifdef __SDCC_sm83` branches next to the NES code, never replacements, so the milestone 5 merge stays cheap. `build.ps1` builds the NES ROM again (fixed 2026-11-02: `src/platform.h`, NES RAM 3 bytes free); build both after touching shared files.
 - **Main loop** (`gbc/main.c`): river every pass; the player group (`player_update`, `collision_update`) runs at 30 Hz (`LOGIC_FRAMES` 2), the entity group (`entities_update`) on the other passes. On overrun passes `ent_skipped` forces `entities_update` after the player group, so it never starves.
 - **Drawing:** river ring is 32 rows in BG map 0 (`$9800`); the river scroll value is also `SCY` (256 px wrap), no split interrupt. `river_live` stays 0 on GBC so uploads take the direct `set_bkg_data` / `set_vram_byte` path.
 - **Sprites:** logic files compile with `-Dshadow_OAM=gbc_logic_oam` (48 slots, NES coordinates); `oam_camera()` converts them (camera, +16/+8, hide off-view), packs the visible ones into the 40 hardware sprites and sets the VRAM bank 1 bit. Sprite tiles are uploaded with `VBK_REG = 1`. Sprite palettes 0..3 are RGB in `gbc/main.c` (`spr_palette`); `player.c`/`entities.c` still pass NES colour numbers, so main overrides them last.
@@ -57,7 +57,7 @@ Short, current, rewritten every session. Rules are in `AGENTS.md`; the plan is `
 
 - `river.c` emits harmless `always false` warnings (zero-width margin loops, `RIVER_LEFT_COL` is 0 on GBC).
 - The "GBC REQUIRED" screen (`_cpu != CGB_TYPE`) has never been run on a plain Game Boy.
-- NES code is still in the tree: `build.ps1`, `tests/nes_*.mjs`, `tests/perf_*`, and NES parts of `src/`. Remove or move it when it gets in the way; `main` keeps it until milestone 5.
+- The NES ROM builds but has not been play-tested since the branch diverged (shared files changed; ROM differs from old `main` build). NES code is still in the tree: `build.ps1`, `tests/nes_*.mjs`, `tests/perf_*`, and NES parts of `src/`. Remove or move it when it gets in the way; `main` keeps it until milestone 5.
 
 ## End of session (keep this cheap)
 

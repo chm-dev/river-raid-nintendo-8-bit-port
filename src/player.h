@@ -8,7 +8,7 @@
 #ifndef PLAYER_H
 #define PLAYER_H
 
-#include <gb/gb.h>
+#include "platform.h"
 #include <stdint.h>
 
 #define PLAYER_START_X          120u
