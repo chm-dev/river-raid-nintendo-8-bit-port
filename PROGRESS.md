@@ -51,3 +51,7 @@ Append-only. Do not read whole; grep for a keyword and read the matching `### da
 - The user played `roms/river_raid_dmg.gb`: "absolutely flawless", every checklist item passes. Then asked for FUEL in dark and light grey, and a light grey balloon with a dark grey stripe and basket.
 - `OBP0` colour 2 is light grey. That would have washed out enemy jets (colour 2 only), so they and their explosion move to colour 3 at upload. Balloon on `OBP1` (`gen_entity_gfx.py`: DMG `ent_gfx_pal`), colours shifted up at upload. `dmg_check.mjs` expects those indexes.
 - Tests: GBC, slow, 2600, 2600 slow and NES ROMs byte-identical; `host_river.ps1`, `host_river_queue.ps1`, `-Dmg -OamCheck` and `-RiverCheck` 0 errors, `dmg_check.mjs`, `sprite_check.mjs`; fast 1.00 / 0.98 / 0.96. Screens of balloon, FUEL and enemy jet looked at. Not yet seen by the user.
+
+### 2026-11-02 - User confirms the rest; 2600 river and smooth edges stale (branch `dmg-exact`)
+
+- The user confirmed the DMG colours, the high-score save and the sprite Y position. Marked `[x]` in `BUGS&FEATS.md`. The user made 2600 river mode and smooth blocky edges stale (new status `[-]`); no code changed, `-River2600` stays.

@@ -2,13 +2,13 @@
 
 Short, current, rewritten every session. Rules are in `AGENTS.md`; **the plan is `PLAN_DMG.md`**; history is `PROGRESS.md` (grep it, do not read whole).
 
-**Last updated:** 2026-11-02 · **Branch:** `dmg-exact` (from `river-2600`) · **Phase:** the exact river on DMG passed the user's playtest ("absolutely flawless"); two colour requests done, waiting for the user's look.
+**Last updated:** 2026-11-02 · **Branch:** `dmg-exact` (from `river-2600`) · **Phase:** the exact river on DMG is confirmed by the user, colours included. Nothing is waiting for a playtest.
 
 ## Where we are
 
 - **GBC port finished on `main`** (architecture: `archive/gbc/HANDOFF.md`). `main` does **not** have the Stage 1b speedups or the DMG work; they are not pushed by us and not merged. Merging is the user's call.
 - **`roms/river_raid_dmg.gb` (`.\build_gbc.ps1 -Dmg -Name river_raid_dmg`) is the exact river on one VRAM bank, with no art cut.** All gates pass, including the user's playtest (2026-11-02, every checklist item).
-- **The 2600 river is parked, not dropped:** flags `RIVER_2600`, `RIVER_BLOCKY`, `RIVER_NOFEAT`, `RIVER_FAST`, `build_gbc.ps1 -River2600`, tasks and findings in `PLAN_2600.md`.
+- **The 2600 river is stale (user, 2026-11-02): not being pursued, but the code stays and keeps building:** flags `RIVER_2600`, `RIVER_BLOCKY`, `RIVER_NOFEAT`, `RIVER_FAST`, `build_gbc.ps1 -River2600`, tasks and findings in `PLAN_2600.md`.
 
 **Fast flight, 10 s, start index 0 / 2 / 3** (playing an invulnerable jet holding Up):
 
@@ -28,10 +28,9 @@ Short, current, rewritten every session. Rules are in `AGENTS.md`; **the plan is
 
 ## Next steps
 
-1. **The user looks at the colours** in `roms/river_raid_dmg.gb`: FUEL dark and light grey, balloon light grey with a dark stripe and basket, enemy jets still dark and easy to see. Then mark it in `BUGS&FEATS.md`.
-2. The user's calls: merge `dmg-exact`, and the GBC bottom-row clobber. Optional: boot time (~1.5-1.7 s blank), remaining peaks (`river_find_dup`, `river_copy_template`).
+No work is planned until the user asks. The user's calls: merge `dmg-exact`, and the rare bottom-row clobber on the GBC exact ROM; the NES is unmeasured (`BUGS&FEATS.md`). Optional: boot time (~1.5-1.7 s blank), remaining peaks (`river_find_dup`, `river_copy_template`).
 
-Parked: 2600 river work (Stage 1b steps 5-8, Stage 2), **smooth blocky edges** (`BUGS&FEATS.md`). Open for the user: the rare bottom-row clobber on the GBC exact ROM; the NES is unmeasured (`BUGS&FEATS.md`).
+Stale (user, 2026-11-02; do not start unless asked): 2600 river work (Stage 1b steps 5-8, Stage 2), **smooth blocky edges** (`BUGS&FEATS.md`).
 
 **Playtest checklist (passed 2026-11-02; repeat after big changes):** land and water read apart at a glance · every enemy, FUEL and the bridge are visible on water and on land · trees, houses and roads look right, no wrong tiles anywhere, including the bottom rows and just below the top of the view · fast flight feels like `river_raid_slow.gb` on start levels 1, 20 and 50 · low fuel: E and F blink · bridge shot: water flashes, and by the code the HUD text flickers with it (one `BGP`): does that bother you? · pause menu readable · crash and restart · high score after power-off · a long game past level 13 (fast helicopters).
 

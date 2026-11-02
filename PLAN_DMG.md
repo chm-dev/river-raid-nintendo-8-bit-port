@@ -2,7 +2,7 @@
 
 Started 2026-11-02, branch `dmg-exact`. An experiment: `river-2600` stays as the fallback. Update this file as tasks finish; it is the place for numbers.
 
-**Status:** tasks 1-5 done. **The user played `roms/river_raid_dmg.gb` on 2026-11-02: "absolutely flawless", every checklist item passes.** Two colour requests followed (task 4); those wait for the user's look. The user chose the delay queue and tile sharing on 2026-11-02, after the task 1 report.
+**Status:** tasks 1-5 done. **The user played `roms/river_raid_dmg.gb` on 2026-11-02: "absolutely flawless", every checklist item passes.** Two colour requests followed (task 4); the user confirmed those too. The user chose the delay queue and tile sharing on 2026-11-02, after the task 1 report.
 
 ## Why this is worth trying
 
