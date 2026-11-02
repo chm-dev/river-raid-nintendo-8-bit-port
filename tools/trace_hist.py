@@ -83,6 +83,8 @@ excl = collections.Counter()
 calls = collections.Counter()
 passes = []                                 # one Counter of phase costs per pass
 cur = collections.Counter()
+cursym = collections.Counter()
+passsyms = []
 phase, irq_save = "start", None
 frames = 0
 total = 0
@@ -103,6 +105,7 @@ with open(trace, errors="replace") as fh:
             c *= 4
             excl[prev[2]] += c
             cur[prev[3]] += c
+            cursym[prev[2]] += c
             total += c
         s = sym_of(full) if addr < 0x8000 else "RAM/HRAM"
         if addr == 0x40:
@@ -115,7 +118,9 @@ with open(trace, errors="replace") as fh:
             elif full in entry:
                 if full == first:
                     passes.append(cur)
+                    passsyms.append(cursym)
                     cur = collections.Counter()
+                    cursym = collections.Counter()
                 phase = entry[full]
             elif s == "_main":
                 phase = "main"
@@ -127,6 +132,7 @@ with open(trace, errors="replace") as fh:
             phase, irq_save = irq_save, None
 
 passes = passes[1:]                         # the first is partial
+passsyms = passsyms[1:]
 n = max(len(passes), 1)
 print(f"{frames:.0f} frames, {n} passes = {n / frames:.2f} passes/frame")
 names = sorted({k for p in passes for k in p}, key=lambda k: -sum(p[k] for p in passes))
@@ -142,6 +148,7 @@ print("\nworst passes:")
 for i in sorted(range(n), key=lambda i: -work[i])[:8]:
     top = ", ".join(f"{k} {v}" for k, v in passes[i].most_common(4) if k != "vsync")
     print(f"  #{i}: {work[i]:7}  {top}")
+    print("         " + ", ".join(f"{k} {v}" for k, v in passsyms[i].most_common(7)))
 print(f"\n{'function (exclusive)':30} {'entries':>7} {'avg/pass':>9} {'%':>5}")
 for k, v in excl.most_common(rows):
     print(f"{k:30} {calls[k]:7} {v / n:9.0f} {100 * v / total:5.1f}")
