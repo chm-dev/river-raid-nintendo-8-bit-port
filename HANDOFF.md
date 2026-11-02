@@ -2,7 +2,7 @@
 
 Short, current, rewritten every session. Rules are in `AGENTS.md`; the plan is `PLAN_2600.md`; history is `PROGRESS.md` (grep it, do not read whole). The proposal is `docs/PROPOSAL_2600_RIVER_MODE.md`.
 
-**Last updated:** 2026-11-02 · **Branch:** `river-2600` · **Phase:** Stage 1 built and measured; waiting for the user's playtest and the Stage 1 check. Gates X=1.00 / Y=0.60 are close but **not met**.
+**Last updated:** 2026-11-02 · **Branch:** `river-2600` · **Phase:** Stage 1 built; the user played the single-speed proxy ROM: "almost acceptable but still not there". **Current focus: Stage 1b, performance** (`PLAN_2600.md`), until the DMG-clock proxy is acceptable. Gates X=1.00 / Y=0.60 not met (0.97 / 0.57).
 
 ## Where we are
 
@@ -13,11 +13,19 @@ Short, current, rewritten every session. Rules are in `AGENTS.md`; the plan is `
 
 ## Next steps
 
-1. **User:** playtest `roms/river_raid_2600.gb` (checklist below). Decide whether the blocky look is acceptable and whether to go on.
-2. **Islands on the fast path** (even levels, 25% of bands; the level-1 profile never runs them, so their peak is still the old one). Same shape as plain edges: 4 boundaries, jumps at row 7.
-3. **Remove the 110k `river_band_replay` peaks** (about once per 25 s of fast flight): allow a third jump size (24 px, from grid rounding) and a minimum river width of 16 px in blocky mode (model + C), or spread the replay over passes.
-4. Profile an island stretch (a profile that starts on level 20/50, `river_init` variant 2 or 3), re-measure X and Y, then the Stage 1 check.
-5. Not yet done: sound (not ported), houses/trees snapped to the tile grid (the user allowed dropping them). `oam_camera` (9k units per pass, 14k at the proxy clock) and the stripe write are the next biggest per-pass costs.
+Do **Stage 1b in `PLAN_2600.md`, in order** (it has the baseline split, the recipe and a results table to fill in):
+
+1. **Profile inside entities/player** (~49k of the ~123k units per pass at the proxy clock; never looked inside). `python tools/resolve_sub.py` names the `SUB_` entries (rebuild the GBC ROM last: the NES build overwrites `roms/river_raid.noi`).
+2. Cut what step 1 shows (fewer banked calls per pass, skip unchanged work).
+3. `oam_camera` (14k per pass at the proxy clock): dirty-sprite skip; assembly only after the DMG gate.
+4. Stripe write (bulk write in VBlank, only changed cells, no attribute pass unless the palette changes).
+5. Replay spikes (min river width 16 px + third jump size in model and C, spread mixed-band replays).
+6. Island bands on the fast path. **Will not fit in bank 0** (~350 bytes free): ask the user before moving code between banks. Needs a profile that starts on an even level (`river_init(2)`).
+7. Re-measure, then ask the user to playtest the `-DmgProxy` ROM again.
+
+Parked: **smooth blocky edges** (user's idea, in `BUGS&FEATS.md`; do not start before step 7 unless asked), sound (not ported), houses/trees snapped to the grid.
+
+**Per-step check:** `host_river_fast.ps1 -Rows 20000 -JobCols 10`, `host_river.ps1 -Blocky` and `host_river.ps1` (exact), `.\build.ps1` (NES, then rebuild GBC), bank 0 end in the `.map`, profile fast + cruise with `.\build_gbc.ps1 -ProfExport -River2600 [-DmgProxy] -Name <rom>` and `$env:GB_NOI='roms/<rom>.noi'; node tests/gb/profile_play.mjs fast|cruise 12` (Gearboy launch line: `AGENTS.md`).
 
 ## Playtest checklist (`roms/river_raid_2600.gb`)
 

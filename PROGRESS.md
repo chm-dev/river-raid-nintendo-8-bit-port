@@ -16,3 +16,8 @@ Append-only. Do not read whole; grep for a keyword and read the matching `### da
 - Built `RIVER_2600`/`RIVER_BLOCKY`/`RIVER_NOFEAT`/`RIVER_FAST` in `src/river.c` and the model. Plain tile rows become atlas tile ids without rendering; the previous band's ids are reused on straight stretches. User gates: X=1.00, Y=0.60.
 - Result: fast 0.97, DMG proxy 0.57 (level 1). Not met. Remaining: band replay peaks, islands, oam_camera.
 - Tests: `host_river.ps1` default/-Mode2600/-Blocky/-Blocky -Grid 4 all match the model; `host_river_fast.ps1` (grid 8) identical on 4 start levels; NES build OK; GBC bank 0 checked (`$3E70` end without ProfExport). Playtest not run (user).
+
+### 2026-11-02 - Stage 1b planned: performance to an acceptable DMG speed (branch `river-2600`)
+
+- The user played `roms/river_raid_2600_slow.gb` (single-speed proxy): "almost acceptable but still not there"; the blocky look is disliked. Assessment of the remaining room (no code changed): entities+player ~40% of a pass, river ~21%, `oam_camera` ~12%.
+- Added Stage 1b to `PLAN_2600.md` (8 ordered steps, results table), the "smooth blocky edges" idea to `BUGS&FEATS.md` (parked), `tools/resolve_sub.py` (names profiler `SUB_` entries), and rewrote HANDOFF next steps.
