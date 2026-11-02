@@ -1,8 +1,8 @@
 # PROPOSAL — 2600-style river mode (NOT APPROVED)
 
-**Status: proposal, not approved. Drafted 2026-11-01, amended the same day.**
+**Status: Stage 1 started 2026-11-02 (see "Decision"); Stage 2 and the DMG commitment are not approved. Drafted 2026-11-01, amended the same day.**
 
-**Agents: do not start, schedule, cite or act on this file** until the user records a decision in the "Decision" section at the bottom. Do not change `HANDOFF.md`, `AGENTS.md` or `GBC_PORT_PLAN.md` because of it. It is deliberately not linked from them.
+**Agents: Stage 1 work is authorised** (branch `river-2600`, tasks in `PLAN_2600.md`). Do not start Stage 2, set gate values, or touch `main` because of this file until the user records it in the "Decision" section at the bottom.
 
 If approved, this proposal reopens three current rules:
 - **"No river atlas"** (`AGENTS.md` rule 6, `HANDOFF.md` decisions). A 2600 river is built from straight and angled edges, so a fixed edge-tile atlas becomes possible.
@@ -110,4 +110,4 @@ Peaks, not averages (`AGENTS.md` rule 9). Take a **baseline first** on the curre
 
 ## Decision
 
-_Not decided. The user records approval, rejection or changes here._
+**2026-11-02 — Stage 1 started (recorded by Claude from the user's instruction to prepare the workspace on a branch).** Work happens on branch `river-2600`; `HANDOFF.md`, `PLAN_2600.md` and `AGENTS.md` now refer to this file. The milestone 2 go/no-go this proposal waited for was already given (the GBC port is merged to `main`). Still open and not approved: the Stage 1 gate values (X, Y), the Stage 2 DMG prototype, the DMG gate, and the NES rollout. The user records those here.

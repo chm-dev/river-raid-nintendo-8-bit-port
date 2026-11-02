@@ -4,7 +4,8 @@ Stable rules only. Status lives in `HANDOFF.md`; the roadmap is `GBC_PORT_PLAN.m
 
 ## Project status
 - **Read `HANDOFF.md` first.** Short and current: where we are, next steps, decisions not to reopen, where to look.
-- **`GBC_PORT_PLAN.md` is the course of action:** decisions, measurements, technical design, milestones, risks, build and emulator notes.
+- **`PLAN_2600.md` is the working plan:** task checklists, gates and baseline numbers for the 2600 river mode. The decision text and risks are in `docs/PROPOSAL_2600_RIVER_MODE.md`.
+- **GBC history is in `archive/gbc/`** (old HANDOFF, PROGRESS, GBC_PORT_PLAN, BUGS&FEATS: architecture, baseline measurements, build and emulator notes). Open it only when needed.
 - **`PROGRESS.md` is append-only history.** Do not read it whole. Grep it for a keyword and read only the matching `### date - title` entry.
 - **NES history is in `archive/nes/`** (old HANDOFF, PROGRESS, PORTING_PLAN, BUGS&FEATS, Mesen notes, NES AGENTS and LESSONS). Open it only when a specific NES reference is needed. Nothing there is required reading.
 - Keep `HANDOFF.md` ~100 lines (up to ~150 when the extra text is clearly valuable). Trim before adding.
@@ -30,7 +31,7 @@ Port of the Atari 8-bit **River Raid** (`xex/River Raid (1983)(Activision)(US)[a
 3. **SDCC local aliasing.** Do not keep a block-local value live across a call in a complex function. SDCC can alias it with the callee's state and the saved value silently changes. Use a file-scope `static` for values like a saved row offset. (This is the river-renderer `ysave` bug; the code comments cite this rule number.)
 4. **Inline `__asm` goes in its own function.** SDCC keeps values in registers across an asm block and corrupts the surrounding C. Raw-row tests can still pass, so verify with real tile pixels (`tests/compare_tile_rows.mjs`, `tests/host_river.ps1`).
 5. **Time-based river.** River code runs on `game_ticks`. Benchmarks must advance `sys_time` themselves: `entities_update()` reads it and it only advances with VBlank.
-6. **No river atlas.** Trees are template fragments; upload exact blocks.
+6. **No river atlas for the exact river.** Trees are template fragments; upload exact blocks. The 2600 river mode (`PLAN_2600.md`) is the only place a fixed edge atlas is allowed.
 7. **Banking.** Keep banked modules in a real bank. A single-bank link with `BANKED` functions jumped into unmapped ROM (`RST_38`).
 8. **Check the map after every link.** Each bank's code must stay inside its window (`$0000-$3FFF` bank 0, `$4000-$7FFF` for banked code). The linker may not fail on overflow, so treat `.map` as the source of truth until milestone 1 confirms the behaviour.
 9. **Profile peaks, not averages** (`LESSONS.md` item 14). Prove an optimisation by diffing output, not only with a test (`LESSONS.md` item 18).
@@ -55,6 +56,6 @@ Gearboy is the GB/GBC emulator with an MCP server. The folder is gitignored and 
 ## Workflow
 - **The user runs the playtests.** Build the ROM, then hand over a checklist. Do not drive the emulator to confirm gameplay fixes.
 - **Bugs and features:** `BUGS&FEATS.md`. Mark a fix `[~]` until the user confirms it in play, then `[x]`.
-- **Branches:** work on `main`. Branch only for risky or throwaway experiments, never a scratch copy of the tree.
+- **Branches:** work on `main`. Branch only for risky or throwaway experiments, never a scratch copy of the tree. The 2600 river mode lives on `river-2600` until the Stage 1 check.
 - **Never push.** Commit locally and stop; the user pushes to origin themselves. Do not run `git push`.
 - **Session end:** the steps are at the bottom of `HANDOFF.md`. Do not edit `AGENTS.md` for status.
