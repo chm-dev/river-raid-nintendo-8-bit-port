@@ -4,7 +4,7 @@ Status: `[ ]` open · `[~]` fixed, waiting for the user's playtest · `[x]` conf
 Older lists: `archive/gbc/BUGS&FEATS.md`, `archive/nes/BUGS&FEATS.md`.
 
 # BUGS
-- [ ] **Shipped GBC and NES ROMs: rare wrong tiles in the bottom ~10 px of the view** (found 2026-11-02 by `tests/host_tile_budget.ps1`, not seen in play). The 250-slot cache is reused while a row is still on screen: 67-151 cells per 60,000 tile rows, age 27-28 rows; 266 slots would be needed. Not fixed: the user decides whether it matters. The DMG ROM does not have it.
+- [ ] **GBC exact ROM: rare wrong tiles in the bottom ~10 px of the view** (found 2026-11-02 by `tests/host_tile_budget.ps1` on the host, not seen in play). The 250-slot cache is reused while a row is still on screen: 67-151 cells per 60,000 tile rows, age 27-28 rows; 266 slots would be needed. The NES ROM has the same row lifetime by geometry, but uploads through its VBlank buffer and shows a different view: not measured. Not fixed: the user decides whether it matters. The DMG ROM does not have it.
 
 # FEATURES
 - [~] **Exact river on DMG** (`PLAN_DMG.md`). Built: `roms/river_raid_dmg.gb`, delay queue and shared tiles, no art cut. Waits for the user's playtest.

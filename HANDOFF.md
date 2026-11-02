@@ -31,9 +31,9 @@ Short, current, rewritten every session. Rules are in `AGENTS.md`; **the plan is
 1. **The user plays `roms/river_raid_dmg.gb`.** Checklist below. Then mark it in `BUGS&FEATS.md`.
 2. Depending on that: shades on real hardware, boot time (~1.5 s blank), remaining peaks (`river_find_dup`, `river_copy_template`).
 
-Parked: 2600 river work (Stage 1b steps 5-8, Stage 2), **smooth blocky edges** (`BUGS&FEATS.md`). Open for the user: the rare bottom-row clobber on the GBC and NES ROMs (`BUGS&FEATS.md`).
+Parked: 2600 river work (Stage 1b steps 5-8, Stage 2), **smooth blocky edges** (`BUGS&FEATS.md`). Open for the user: the rare bottom-row clobber on the GBC exact ROM; the NES is unmeasured (`BUGS&FEATS.md`).
 
-**Playtest checklist:** land and water read apart at a glance · every enemy, FUEL and the bridge are visible on water and on land · trees, houses and roads look right, no wrong tiles anywhere, including the bottom rows and just below the top of the view · fast flight feels like `river_raid_slow.gb` on start levels 1, 20 and 50 · low fuel: E and F blink · bridge shot: water flashes · pause menu readable · crash and restart · high score after power-off · a long game past level 13 (fast helicopters).
+**Playtest checklist:** land and water read apart at a glance · every enemy, FUEL and the bridge are visible on water and on land · trees, houses and roads look right, no wrong tiles anywhere, including the bottom rows and just below the top of the view · fast flight feels like `river_raid_slow.gb` on start levels 1, 20 and 50 · low fuel: E and F blink · bridge shot: water flashes, and by the code the HUD text flickers with it (one `BGP`): does that bother you? · pause menu readable · crash and restart · high score after power-off · a long game past level 13 (fast helicopters).
 
 **Per-step check:** `host_river.ps1` (exact), `host_river.ps1 -Blocky`, `host_river_fast.ps1 -Rows 20000 -JobCols 10`, `host_river_queue.ps1`, `.\build.ps1` (NES), then `.\build_gbc.ps1`, `-River2600`, `-Dmg`. **After shared code, compare ROM hashes:** GBC, 2600 and NES ROMs must be byte-identical unless the change is meant for them. Bank 0 end in the `.map`. Profile: `.\build_gbc.ps1 -ProfExport -Dmg -Name rr_dmg_prof`, `$env:GB_NOI='roms/rr_dmg_prof.noi'; node tests/gb/profile_play.mjs fast|cruise 40` (`$env:GB_START_LEVEL=n` for another start; Gearboy launch line in `AGENTS.md`). **After touching assembly or its C twin:** `-OamCheck` and `-RiverCheck` ROMs, run with `profile_play.mjs`: all error counts must be 0. **Before a handover:** `tests/gb/dmg_check.mjs` and `tests/gb/sprite_check.mjs` on the player ROM, each on a freshly started emulator, and look at a screenshot.
 
@@ -66,7 +66,7 @@ Parked: 2600 river work (Stage 1b steps 5-8, Stage 2), **smooth blocky edges** (
 
 ## Known gaps
 
-- **Nothing has run on a real DMG.** Gearboy's DMG mode is the only evidence. On hardware watch the 2-writes-per-STAT-test timing in `river_vram_copy_asm` and how the shades read.
+- **Nothing has run on a real DMG.** Gearboy's DMG mode is the only evidence. On hardware watch the 2-writes-per-STAT-test timing in `river_vram_copy_asm` and how the shades read. The GBC ROM's "GBC REQUIRED" screen has never run on a plain Game Boy.
 - All timings come from 10 s windows with an invulnerable jet holding Up. Not measured: long runs, heavy shooting, level 13+ fast helicopters at speed. Tile needs are measured over 60,000 rows without player deaths or shots.
 - `dmg_check.mjs`'s river test is coarse (plain rows, middle of the channel); the exact picture is proved on the host (`host_river_queue.ps1`). It and `sprite_check.mjs` run on the first start level only.
 - Not looked at in a screenshot: the bridge flash, level 13+ fast helicopters and their missile.

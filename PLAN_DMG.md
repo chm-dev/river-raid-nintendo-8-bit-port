@@ -48,7 +48,7 @@ Layout (`gbc/config_gbc.h`): BG 0..2 fixed, 3..228 cache, 229..254 HUD, 255 free
 
   Lag is how far the shown scroll trails the logic when an upload lands (a pass publishes at its end).
 - **Independent check:** the real allocator, with clobbers decided from map row and SCY alone, goes from >0 to exactly 0 at the predicted size in all 6 cases tried (216, 223, 200, 206, 186, 193) on all 4 starts.
-- **The shipped GBC and NES caches have this too:** at 250 slots: 67-151 clobbered cells per 60,000 rows, age 27-28 rows, so the bottom ~10 px. See `BUGS&FEATS.md`. Not fixed.
+- **The GBC exact ROM has this too:** at 250 slots: 67-151 clobbered cells per 60,000 rows, age 27-28 rows, so the bottom ~10 px. The NES has the same lifetime by geometry, not measured. See `BUGS&FEATS.md`. Not fixed.
 
 ### 2. VRAM layout: done
 See the budget above.
@@ -62,7 +62,7 @@ See the budget above.
 ### 4. Colour to grey: done
 - `BGP`: outline black, land light grey, hills / road line dark grey, water white. The land-colour flip and road colour are gone; the road keeps its pixels. Bridge flash: water goes dark grey (`DMG_BGP_FLASH`).
 - Sprites: colour palette 0 → `OBP0`, 1..3 → `OBP1`, in `oam_camera`. `OBP0` has no white, or FUEL's U and L vanish on the water.
-- HUD: ink is colour 3 on 0. Low fuel: E and F go out while the note sounds.
+- HUD: ink is colour 3 on 0, the same index as water, so by the code the bridge flash also flickers the HUD text (not yet seen). If it bothers the user: `BGP` could be reset for the HUD in the LYC handler. Low fuel: E and F go out while the note sounds.
 
 ### 5. Test it: done, the user's playtest is next
 - Gearboy detects the ROM by itself: `is_cgb: false`, boot AF `01B0`.
