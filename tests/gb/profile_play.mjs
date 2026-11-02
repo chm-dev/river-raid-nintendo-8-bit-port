@@ -49,7 +49,7 @@ console.log('river_clamps', await rd('_river_clamps'));
 console.log('river_owed_max', await rd('_river_owed_max'));
 if (/DEF _pl_oam_n /.test(noi)) {
     const rd16 = async n => { const o = JSON.parse(txt(await c.call('read_memory', { area: 6, offset: (parseInt(new RegExp(`DEF ${n} 0x([0-9A-Fa-f]+)`).exec(noi)[1], 16) - 0xC000).toString(16).toUpperCase().padStart(4, '0'), size: 2 }))); return parseInt(o.data.replace(/\s+/g, '').match(/../g).reverse().join(''), 16); };
-    console.log('oamcheck: passes', await rd16('_pl_oam_n'), 'errors', await rd16('_pl_oam_err'), 'draw errors', await rd16('_pl_oam_draw_err'));
+    console.log('oamcheck: passes', await rd16('_pl_oam_n'), 'errors', await rd16('_pl_oam_err'), 'draw errors', await rd16('_pl_oam_draw_err'), 'scan errors', await rd16('_pl_scan_err'));
 }
 const w = d.functions.find(f => f.name === '_river_update');   /* one per pass; vsync() is skipped after an overrun */
 console.log(`mode ${mode}: frames ${d.frames}, passes ${w ? w.calls : '?'}, passes/frame ${w ? (w.calls / d.frames).toFixed(2) : '?'}`);

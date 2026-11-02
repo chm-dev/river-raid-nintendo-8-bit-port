@@ -124,6 +124,9 @@ static volatile OAM_item_t *e_o;
 static uint8_t e_oam;
 static uint8_t e_px;
 static uint8_t e_n;
+#ifdef PROF_OAMCHECK
+uint16_t pl_scan_err;
+#endif
 
 static uint8_t ent_random(void) {
     ent_rng ^= (uint8_t)(ent_rng << 7);
@@ -909,10 +912,95 @@ uint8_t entities_hit_shot(uint8_t sx, uint8_t sy) BANKED {
  * every ent_y[e_i] access into a ~30-cycle pointer setup, which made the C
  * version ~4k cycles per call (2.0k/frame in the profile).  Its own function,
  * as inline asm must be. */
+#ifdef __SDCC_sm83
+typedef char ent_scan_asm_consts[(MAX_ENTITIES == 11u && ENT_AUX_JET == 7u && ENT_AUX_FUEL == 15u &&
+                                  ENT_AUX_SHELL == 17u && SHELL_FLY_FRAMES == 0x11u) ? 1 : -1];
+
+/* C = slot, DE = type as an index. */
+static void ent_scan_asm(void) {
+    __asm
+        ld      a, (_e_i)
+        ld      c, a
+        ld      b, #0
+    1$:
+        ld      a, c
+        cp      a, #11
+        jr      NC, 9$
+        ld      hl, #_ent_type
+        add     hl, bc
+        ld      a, (hl)
+        cp      a, #7
+        jr      C, 7$
+        cp      a, #16
+        jr      NC, 6$
+        ld      e, a
+        ld      d, #0
+        ld      hl, #_ent_y
+        add     hl, bc
+        ld      a, (hl)
+        ld      hl, #_e_y
+        sub     a, (hl)             ; ent - jet
+        cp      a, #14
+        jr      C, 4$
+        cpl
+        inc     a                   ; jet - ent
+        ld      hl, #_ent_gfx_rows
+        add     hl, de
+        cp      a, (hl)
+        jr      NC, 7$
+    4$:
+        ld      hl, #_ent_x
+        add     hl, bc
+        ld      a, (hl)
+        ld      hl, #_e_px
+        sub     a, (hl)             ; ent - jet
+        cp      a, #8
+        jr      C, 8$
+        cpl
+        inc     a                   ; jet - ent
+        ld      d, a
+        ld      a, e
+        ld      hl, #_ent_gfx_cols
+        add     a, l
+        ld      l, a
+        adc     a, h
+        sub     a, l
+        ld      h, a
+        ld      a, (hl)
+        add     a, a
+        add     a, a
+        add     a, a                ; width
+        cp      a, d
+        jr      Z, 7$
+        jr      NC, 8$
+        jr      7$
+    6$:
+        cp      a, #17
+        jr      NZ, 7$
+        ld      hl, #_ent_aux
+        add     hl, bc
+        ld      a, (hl)
+        cp      a, #0x11
+        jr      NC, 8$
+    7$:
+        inc     c
+        jr      1$
+    9$:
+        ld      c, #0xFF
+    8$:
+        ld      a, c
+        ld      (_e_i), a
+    __endasm;
+}
+#endif
+
+#if defined(__SDCC_sm83) && !defined(PROF_OAMCHECK)
+#define ent_scan_player ent_scan_asm
+#else
 static void ent_scan_player(void) {
 #ifndef __SDCC_mos6502
     /* Pointers, not ent_y[e_i]: no calls in this loop, and each indexed access costs
-     * ~14 M-cycles on the sm83. */
+     * ~14 M-cycles on the sm83.  The GBC uses ent_scan_asm; -OamCheck compares them. */
     const uint8_t *tp = &ent_type[e_i];
     const uint8_t *yp = &ent_y[e_i];
     uint8_t t, v;
@@ -994,6 +1082,7 @@ static void ent_scan_player(void) {
     __endasm;
 #endif
 }
+#endif
 
 uint8_t entities_check_player(uint8_t px, uint8_t py) BANKED {
     e_px = px;
@@ -1008,7 +1097,18 @@ uint8_t entities_check_player(uint8_t px, uint8_t py) BANKED {
     }
     e_i = 0;
     for (;;) {
+#ifdef PROF_OAMCHECK
+        e_t = e_i;
         ent_scan_player();
+        e_n = e_i;
+        e_i = e_t;
+        ent_scan_asm();
+        if (e_i != e_n) {
+            pl_scan_err++;
+        }
+#else
+        ent_scan_player();
+#endif
         if (e_i == 0xFFu) {
             return ENT_HIT_NONE;
         }
@@ -1274,6 +1374,59 @@ static uint8_t e_dx;
 /* Write e_cols consecutive sprites (one 8-pixel row of an entity) at OAM byte
  * offset e_off, stopping at the entity sprite budget.  Hand-written: the C
  * version took ~190 cycles per sprite, this ~45. */
+#ifdef __SDCC_sm83
+/* HL = OAM entry, B = columns left, C = byte offset, D = x, E = tile. */
+static void ent_emit_asm(void) {
+    __asm
+        ld      a, (_e_cols)
+        or      a, a
+        ret     Z
+        ld      b, a
+        ld      a, (_e_off)
+        ld      c, a
+        ld      e, a
+        ld      d, #0
+        ld      hl, #_gbc_logic_oam
+        add     hl, de
+        ld      a, (_e_px)
+        ld      d, a
+        ld      a, (_e_tile)
+        ld      e, a
+    1$:
+        ld      a, c
+        cp      a, #176
+        jr      NC, 2$
+        ld      a, (_e_y)
+        ld      (hl+), a
+        ld      a, e
+        ld      (hl+), a
+        inc     e
+        ld      a, (_e_prop)
+        ld      (hl+), a
+        ld      a, d
+        ld      (hl+), a
+        ld      a, (_e_dx)
+        add     a, d
+        ld      d, a
+        ld      a, c
+        add     a, #4
+        ld      c, a
+        dec     b
+        jr      NZ, 1$
+    2$:
+        ld      a, c
+        ld      (_e_off), a
+        ld      a, d
+        ld      (_e_px), a
+        ld      a, e
+        ld      (_e_tile), a
+    __endasm;
+}
+#endif
+
+#if defined(__SDCC_sm83) && !defined(PROF_OAMCHECK)
+#define ent_emit_row ent_emit_asm
+#else
 static void ent_emit_row(void) {
 #ifndef __SDCC_mos6502
     /* GBC and host build (tests/host/spawn_main.c): same thing in C. */
@@ -1316,6 +1469,7 @@ static void ent_emit_row(void) {
     __endasm;
 #endif
 }
+#endif
 /* Bridge debris: frame (e_type - 2) of ent_exp14_map, 3 tile rows x 4 columns;
  * blank tiles are not drawn. */
 static void ent_draw_bridge_debris(void) {
@@ -1479,10 +1633,183 @@ static void ent_draw_reg(void) {
 }
 #endif
 
+#ifdef __SDCC_sm83
+typedef char ent_draw_asm_consts[(ENT_TILE_BASE == 88u && S_FLIPX == 0x20u && ENT_DRAW_TOP_VIEW == 96u &&
+                                  ENT_CULL_Y == 240u && ENT_AUX_BALLOON == 12u && ENT_AUX_FUEL == 15u &&
+                                  ENT_F_LEFT == 1u) ? 1 : -1];
+#ifdef PROF_OAMCHECK
+static uint8_t ent_draw_ref;    /* ent_check_redraw(): every type through the C path */
+#endif
+
+/* ent_draw() for an ordinary object (types 7..15), as ent_draw_reg does on the NES: the C setup
+ * below was ~300 M-cycles per entity.  DE = slot, BC = type, both as indexes. */
+static void ent_draw_asm(void) {
+    __asm
+        ld      a, (_e_i)
+        ld      e, a
+        ld      d, #0
+        ld      hl, #_ent_type
+        add     hl, de
+        ld      a, (hl)
+        ld      (_e_type), a
+        ld      c, a
+        ld      b, #0
+        ld      hl, #_ent_gfx_first
+        add     hl, bc
+        ld      a, (hl)
+        add     a, #88              ; ENT_TILE_BASE
+        ld      (_e_tile), a
+        ld      hl, #_ent_gfx_cols
+        add     hl, bc
+        ld      a, (hl)
+        ld      (_e_cols), a
+        ld      hl, #_ent_gfx_pal
+        add     hl, bc
+        ld      a, (hl)
+        ld      (_e_prop), a
+        ld      hl, #_ent_gfx_rows
+        add     hl, bc
+        ld      a, (hl)
+        ld      (_e_rows), a
+        ld      hl, #_ent_y
+        add     hl, de
+        ld      a, (hl)
+        ld      b, a
+        ld      a, c
+        cp      a, #12              ; balloon: its tiles are padded 4 rows at the top
+        ld      a, b
+        jr      NZ, 1$
+        sub     a, #4
+    1$:
+        ld      (_e_y), a
+        ld      hl, #_ent_x
+        add     hl, de
+        ld      a, (hl)
+        ld      (_e_ex), a
+        ld      b, a
+        ld      a, #8
+        ld      (_e_dx), a
+        ld      hl, #_ent_flags
+        add     hl, de
+        bit     0, (hl)             ; ENT_F_LEFT
+        jr      Z, 2$
+        ld      a, c
+        cp      a, #15              ; fuel depots never flip
+        jr      Z, 2$
+        ld      hl, #_e_prop        ; mirror: flip every tile, walk the columns from the right
+        set     5, (hl)             ; S_FLIPX
+        ld      a, (_e_cols)
+        dec     a
+        add     a, a
+        add     a, a
+        add     a, a
+        add     a, b
+        ld      (_e_ex), a
+        ld      a, #0xF8
+        ld      (_e_dx), a
+    2$:
+        ld      a, (_e_oam)
+        add     a, a
+        add     a, a
+        ld      (_e_off), a
+        xor     a, a
+        ld      (_e_t), a
+    3$:                             ; one 8-pixel tile row per pass
+        ld      a, (_e_type)
+        cp      a, #12
+        jr      NZ, 4$
+        ld      a, (_e_t)
+        add     a, #8
+        ld      hl, #_e_rows
+        cp      a, (hl)
+        jr      C, 4$
+        ld      a, (_e_y)           ; only rows that are drawn: as in C, clipped rows skip this
+        cp      a, #96
+        jr      C, 4$
+        cp      a, #240
+        jr      NC, 4$
+        ld      a, (_e_off)
+        cp      a, #176
+        jr      NC, 4$
+        ld      a, (_e_prop)        ; the last tile row is the brown basket: sprite palette 1
+        and     a, #0xFC
+        or      a, #1
+        ld      (_e_prop), a
+    4$:
+        ld      a, (_e_y)
+        cp      a, #96              ; ENT_DRAW_TOP
+        jr      C, 5$
+        cp      a, #240             ; ENT_CULL_Y
+        jr      NC, 5$
+        ld      a, (_e_off)
+        cp      a, #176
+        jr      NC, 5$
+        ld      a, (_e_ex)
+        ld      (_e_px), a
+        call    _ent_emit_asm
+        jr      6$
+    5$:                             ; clipped row: skip its tiles
+        ld      a, (_e_cols)
+        ld      hl, #_e_tile
+        add     a, (hl)
+        ld      (hl), a
+    6$:
+        ld      hl, #_e_y
+        ld      a, (hl)
+        add     a, #8
+        ld      (hl), a
+        ld      a, (_e_t)
+        add     a, #8
+        ld      (_e_t), a
+        ld      hl, #_e_rows
+        cp      a, (hl)
+        jr      C, 3$
+        ld      a, (_e_off)
+        rrca
+        rrca
+        and     a, #0x3F
+        ld      (_e_oam), a
+    __endasm;
+}
+
+/* Entity sprites follow the river: HL = OAM y, B = slots, C = rows, DE = 4. */
+static void ent_follow_asm(void) {
+    __asm
+        ld      a, (_ent_oam_used)
+        sub     a, #2               ; ENT_OAM_TANK
+        ret     Z
+        ret     C
+        ld      b, a
+        ld      a, (_river_rows_last)
+        ld      c, a
+        ld      hl, #(_gbc_logic_oam + 8)
+        ld      de, #4
+    1$:
+        ld      a, (hl)
+        cp      a, #240             ; ENT_CULL_Y
+        jr      NC, 2$
+        add     a, c
+        ld      (hl), a
+    2$:
+        add     hl, de
+        dec     b
+        jr      NZ, 1$
+    __endasm;
+}
+#endif
+
 static void ent_draw(void) {
 #ifdef __SDCC_sm83
     /* Wholly above ENT_DRAW_TOP (24 rows at most, y >= 250 wraps to below 6). */
     if ((uint8_t)(ent_y[e_i] + 6u) < (uint8_t)(ENT_DRAW_TOP + 6u - 24u)) {
+        return;
+    }
+#ifdef PROF_OAMCHECK
+    if (!ent_draw_ref && ent_type[e_i] > ENT_AUX_EXPLODE_LAST && ent_type[e_i] < ENT_AUX_TANK) {
+#else
+    if (ent_type[e_i] > ENT_AUX_EXPLODE_LAST && ent_type[e_i] < ENT_AUX_TANK) {
+#endif
+        ent_draw_asm();
         return;
     }
 #endif
@@ -1564,7 +1891,9 @@ void entities_follow(void) BANKED {
     if (river_rows_last == 0u) {
         return;
     }
-#ifndef __SDCC_mos6502
+#ifdef __SDCC_sm83
+    ent_follow_asm();
+#elif !defined(__SDCC_mos6502)
     {
         volatile uint8_t *y = (volatile uint8_t *)&shadow_OAM[ENT_OAM_TANK];
         uint8_t v;
@@ -1604,6 +1933,7 @@ void entities_follow(void) BANKED {
 /* Redraw every entity with the given top limit, for the byte-for-byte check in gbc/main.c. */
 void ent_check_redraw(uint8_t top) BANKED {
     ent_draw_top = top;
+    ent_draw_ref = 1u;
     e_oam = ENT_OAM_FIRST;
     for (e_t = ENT_OAM_TANK; e_t < ENT_OAM_MISSILE; e_t++) {
         shadow_OAM[e_t].y = 240u;
@@ -1618,6 +1948,7 @@ void ent_check_redraw(uint8_t top) BANKED {
         shadow_OAM[ent_oam_used].y = 240u;
     }
     ent_oam_used = e_oam;
+    ent_draw_ref = 0u;
 }
 #endif
 

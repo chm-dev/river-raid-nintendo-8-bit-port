@@ -108,10 +108,12 @@ void hud_set_playfield_scroll(uint8_t y) {
 /* An original Game Boy ignores the header's CGB-only flag, so say why nothing
  * will run instead of showing garbage. */
 static void gbc_required(void) {
+#if !defined(PROF_OAMCHECK) && !defined(PROF_RIVERCHECK)      /* the check ROMs need its bank 0 bytes */
     font_init();
     font_set(font_load(font_ibm));
     gotoxy(4, 8);
     puts("GBC REQUIRED");
+#endif
     SHOW_BKG;
     DISPLAY_ON;
     for (;;) {
@@ -258,13 +260,90 @@ static void oam_camera_slow(void) {
 #define OAM_SHOT_SLOT       47u     /* = PLAYER_SHOT_SLOT in player.c */
 static uint8_t oam_cam_xbase;
 
+/* Translate oam_cam_n logic slots from oam_cam_s into the OAM page at oam_cam_d, stopping when
+ * the page is full.  Hand-written: ~15 M-cycles per hidden slot and ~40 per sprite against
+ * 25 and 75 in C.  HL = source, DE = destination (the pages are aligned, so inc e is enough),
+ * B = slots left, C = camera base.  y + 7 - view top < 135 and x + 8 - 1 < 167 as in the C walk;
+ * nothing is written until both tests pass. */
+static const uint8_t *oam_cam_s;
+static uint8_t *oam_cam_d;
+static uint8_t oam_cam_n;
+typedef char oam_asm_consts[(GBC_VIEW_TOP_SCANLINE == 112u && GBC_VIEW_LINES == 128u && S_BANK == 8u) ? 1 : -1];
+
+static void oam_camera_core(void) {
+    __asm
+        ld      hl, #_oam_cam_n
+        ld      a, (hl)
+        or      a, a
+        ret     Z
+        ld      b, a
+        ld      a, (_oam_cam_xbase)
+        ld      c, a
+        ld      a, (_oam_cam_d)
+        ld      e, a
+        ld      a, (_oam_cam_d + 1)
+        ld      d, a
+        ld      a, (_oam_cam_s)
+        ld      l, a
+        ld      a, (_oam_cam_s + 1)
+        ld      h, a
+    1$:
+        ld      a, (hl+)            ; y
+        sub     a, #105
+        cp      a, #135
+        jr      NC, 2$
+        ld      a, (hl)             ; x
+        sub     a, c
+        dec     a
+        cp      a, #167
+        jr      NC, 2$
+        inc     a
+        inc     e
+        ld      (de), a
+        dec     e
+        dec     hl
+        ld      a, (hl+)
+        sub     a, #96              ; y + 16 - 112
+        ld      (de), a
+        inc     e
+        inc     e
+        inc     hl
+        ld      a, (hl+)            ; tile
+        ld      (de), a
+        inc     e
+        ld      a, (hl+)            ; prop
+        set     3, a                ; S_BANK
+        ld      (de), a
+        inc     e
+        ld      a, e
+        cp      a, #160
+        jr      Z, 4$
+        jr      3$
+    2$:
+        inc     hl
+        inc     hl
+        inc     hl
+    3$:
+        dec     b
+        jr      NZ, 1$
+    4$:
+        ld      a, l
+        ld      (_oam_cam_s), a
+        ld      a, h
+        ld      (_oam_cam_s + 1), a
+        ld      a, e
+        ld      (_oam_cam_d), a
+        ld      a, d
+        ld      (_oam_cam_d + 1), a
+    __endasm;
+}
+
 /* The common case (no pause menu): same output as oam_camera_slow, walking the
  * arrays by pointer.  The per-slot work is what costs here (64 slots, most of
  * them empty), so index arithmetic and the pause test stay out of the loop. */
 static void oam_camera(void) {
-    const uint8_t *s;
     uint8_t *d;
-    uint8_t i, y;
+    uint8_t i;
 
     if (player_state == GBC_PLAYER_STATE_PAUSE) {
         oam_camera_slow();
@@ -272,37 +351,18 @@ static void oam_camera(void) {
         return;
     }
     oam_cam_xbase = (uint8_t)(SOURCE_X_OFFSET + camera_x - 8u);
-    s = (const uint8_t *)gbc_logic_oam;
-    d = oam_back;
+    oam_cam_d = oam_back;
     /* Outside the pause menu only slots below ent_oam_used and the shot are live. */
-    i = ent_oam_used;
-next_range:
-    /* Byte pointers and few locals: SDCC then keeps s and d in registers.  A hidden
-     * sprite (y >= 240) fails the Y test as well. */
-    for (; i != 0u; i--, s += 4u) {
-        y = (uint8_t)(*s - (GBC_VIEW_TOP_SCANLINE - 7u));       /* vy + 7 */
-        if (y >= (uint8_t)(GBC_VIEW_LINES + 7u)) {
-            continue;
-        }
-        oam_cam_x = (uint8_t)(s[1] - oam_cam_xbase);            /* vx + 8 */
-        if ((uint8_t)(oam_cam_x - 1u) >= 167u) {
-            continue;
-        }
-        *d++ = (uint8_t)(y + 9u);
-        *d++ = oam_cam_x;
-        *d++ = s[2];
-        *d++ = (uint8_t)(s[3] | S_BANK);
-        if ((uint8_t)(uint16_t)d == 160u) {     /* both OAM pages are page aligned */
-            oam_cam_filled = 40u;
-            return;
-        }
-    }
-    if (s != (const uint8_t *)&gbc_logic_oam[OAM_SHOT_SLOT + 1u]) {
-        s = (const uint8_t *)&gbc_logic_oam[OAM_SHOT_SLOT];
-        i = 1u;
-        goto next_range;
+    oam_cam_s = (const uint8_t *)gbc_logic_oam;
+    oam_cam_n = ent_oam_used;
+    oam_camera_core();
+    if ((uint8_t)(uint16_t)oam_cam_d != 160u) {
+        oam_cam_s = (const uint8_t *)&gbc_logic_oam[OAM_SHOT_SLOT];
+        oam_cam_n = 1u;
+        oam_camera_core();
     }
     /* Hardware slots past d are hidden already, up to where the last pass ended. */
+    d = oam_cam_d;
     i = oam_cam_filled;
     oam_cam_filled = (uint8_t)((uint8_t)(uint16_t)d >> 2);
     i = (i > oam_cam_filled) ? (uint8_t)(i - oam_cam_filled) : 0u;
@@ -312,6 +372,7 @@ next_range:
         i--;
     }
 }
+
 /* The HUD Window starts at screen line GBC_VIEW_LINES and sprites draw over it,
  * so entities would stay visible on the HUD until culled.  LYC fires on the last
  * playfield line; once its HBlank is reached (the line's sprites are drawn) the
