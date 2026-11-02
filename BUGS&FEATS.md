@@ -4,10 +4,11 @@ Status: `[ ]` open · `[~]` fixed, waiting for the user's playtest · `[x]` conf
 Older lists: `archive/gbc/BUGS&FEATS.md`, `archive/nes/BUGS&FEATS.md`.
 
 # BUGS
-- [ ] **GBC exact ROM: rare wrong tiles in the bottom ~10 px of the view** (found 2026-11-02 by `tests/host_tile_budget.ps1` on the host, not seen in play). The 250-slot cache is reused while a row is still on screen: 67-151 cells per 60,000 tile rows, age 27-28 rows; 266 slots would be needed. The NES ROM has the same row lifetime by geometry, but uploads through its VBlank buffer and shows a different view: not measured. Not fixed: the user decides whether it matters. The DMG ROM does not have it.
+- [ ] **GBC exact ROM: rare wrong tiles in the bottom ~10 px of the view** (found 2026-11-02 by `tests/host_tile_budget.ps1` on the host, not seen in play). The 250-slot cache is reused while a row is still on screen: 67-151 cells per 60,000 tile rows, age 27-28 rows; 266 slots would be needed. The NES ROM has the same row lifetime by geometry, but uploads through its VBlank buffer and shows a different view: not measured. Not fixed: the user decides whether it matters. The DMG ROM does not have it. **The dual ROM runs the GBC on the 226-slot queue: the host check (`host_river_queue.ps1`) shows 0 clobbers there in 24 runs, so it should be gone on the GBC; `[~]` until the user has looked in play.**
 
 # FEATURES
-- [ ] **One ROM for both GBC and DMG: next, before merging to `main`** (user, 2026-11-02). Outline in `PLAN_DMG.md` "Dual ROM".
+- [~] **One ROM for both GBC and DMG** (user, 2026-11-02), `.\build_gbc.ps1` -> `roms/river_raid.gb`, header `$80`. Waiting for the user's playtest in both modes (checklist in `HANDOFF.md`). Decisions and numbers: `PLAN_DMG.md` "Dual ROM".
+- [ ] **Unexplained, rare, not reproduced: a completely white screenshot in DMG mode** while the game was in state 3 (respawn) after a long collector run (`tests/gb/collect_shots.mjs`), LCD on and `BGP`/`OBP` normal. Short crash, fuel-death and Start-during-respawn sequences show no blank frame on the dual or on the old `-Dmg` ROM. May be a Gearboy screenshot artifact; if the user sees a white flash on a real DMG after a crash, this is the lead.
 - [x] **Exact river on DMG** (`PLAN_DMG.md`). `roms/river_raid_dmg.gb`, delay queue and shared tiles, no art cut. The user's playtest, 2026-11-02: "absolutely flawless", every checklist item passes. Not merged; that is the user's call.
 - [x] **DMG colours, user's request after that playtest:** FUEL in dark and light grey; balloon light grey with a dark grey stripe and basket. Enemy jets stay dark. Confirmed by the user, 2026-11-02.
 - [x] **Sprite Y position** (carried over from the GBC list). Confirmed by the user, 2026-11-02.
