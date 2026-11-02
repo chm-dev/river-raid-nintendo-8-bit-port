@@ -51,17 +51,14 @@ volatile uint16_t frame_counter;
 uint8_t game_ticks = 1u;
 static uint8_t ent_skipped;         /* 1 = last pass ran the player group only */
 static uint8_t main_last;
-#ifdef PROF_EXPORT_STATICS
-/* Per-pass log for tests/gb/pass_log.mjs: frames elapsed (game_ticks), pass kind
+#ifdef PROF_PASSLOG
+/* Per-pass log for tests/gb/pass_log.mjs (build_gbc.ps1 -PassLog; ~2k units per pass, so
+ * it is not in the -ProfExport ROMs): frames elapsed (game_ticks), pass kind
  * (0 entities, 1 player, 2 player+entities), LY at pass start / after the river /
  * after the logic, and sys_time deltas for the last two. */
 #define PASS_LOG_N 64u
 uint8_t pl_idx;
 uint8_t pl_rec[PASS_LOG_N][10];
-#ifdef PROF_OAMCHECK
-uint8_t pl_oam_a[160];
-uint16_t pl_oam_n, pl_oam_err;
-#endif
 #endif
 static uint8_t logic_acc;      /* frames since the last logic pass */
 
@@ -230,6 +227,9 @@ static void oam_camera_slow(void) {
     }
 }
 
+#define OAM_SHOT_SLOT       47u     /* = PLAYER_SHOT_SLOT in player.c */
+static uint8_t oam_cam_filled = 40u; /* hardware slots written by the last pass (40: boot, unknown) */
+
 /* The common case (no pause menu): same output as oam_camera_slow, walking the
  * arrays by pointer.  The per-slot work is what costs here (64 slots, most of
  * them empty), so index arithmetic and the pause test stay out of the loop. */
@@ -240,13 +240,17 @@ static void oam_camera(void) {
 
     if (player_state == GBC_PLAYER_STATE_PAUSE) {
         oam_camera_slow();
+        oam_cam_filled = 40u;
         return;
     }
     xbase = (uint8_t)(SOURCE_X_OFFSET + camera_x - 8u);
     s = gbc_logic_oam;
     d = shadow_OAM;
     n = 40u;
-    for (i = LOGIC_OAM_SLOTS; i != 0u; i--, s++) {
+    /* Outside the pause menu only slots below ent_oam_used and the shot are live. */
+    i = ent_oam_used;
+next_range:
+    for (; i != 0u; i--, s++) {
         y = s->y;
         if (y >= ENT_CULL_Y) {
             continue;
@@ -263,13 +267,23 @@ static void oam_camera(void) {
         d->prop = (uint8_t)(s->prop | S_BANK);
         d++;
         if (--n == 0u) {
+            oam_cam_filled = 40u;
             return;
         }
     }
-    while (n != 0u) {
+    if (s != &gbc_logic_oam[OAM_SHOT_SLOT + 1u]) {
+        s = &gbc_logic_oam[OAM_SHOT_SLOT];
+        i = 1u;
+        goto next_range;
+    }
+    /* Hardware slots past n are hidden already, up to where the last pass ended. */
+    i = oam_cam_filled;
+    oam_cam_filled = (uint8_t)(40u - n);
+    i = (i > oam_cam_filled) ? (uint8_t)(i - oam_cam_filled) : 0u;
+    while (i != 0u) {
         d->y = 0u;
         d++;
-        n--;
+        i--;
     }
 }
 /* The HUD Window starts at screen line GBC_VIEW_LINES and sprites draw over it,
@@ -335,8 +349,8 @@ void main(void) {
 
     main_last = (uint8_t)sys_time;
     for (;;) {
-        /* Wait for a new frame, but only if none passed during the last
-         * pass: an overrun pass starts the next one at once (catch-up). */
+        /* vsync() always waits for the NEXT VBlank, so a pass of 1.01 frames
+         * costs 2: pass time is a step function of the work. */
         vsync();
         apply_camera();
 
@@ -354,14 +368,14 @@ void main(void) {
         /* Same schedule as the NES main: the river every frame, the player
          * group and the entity group on alternate frames. */
         river_gen_budget = ((uint8_t)(logic_acc + game_ticks) >= LOGIC_FRAMES) ? 3u : 1u;
-#ifdef PROF_EXPORT_STATICS
+#ifdef PROF_PASSLOG
         pl_rec[pl_idx][0] = game_ticks;
         pl_rec[pl_idx][1] = LY_REG;
         pl_rec[pl_idx][7] = (uint8_t)sys_time;
         pl_rec[pl_idx][8] = river_owed;
 #endif
         river_update();
-#ifdef PROF_EXPORT_STATICS
+#ifdef PROF_PASSLOG
         pl_rec[pl_idx][2] = LY_REG;
         pl_rec[pl_idx][3] = (uint8_t)((uint8_t)sys_time - pl_rec[pl_idx][7]);
         pl_rec[pl_idx][9] = river_owed;
@@ -379,7 +393,7 @@ void main(void) {
                 collision_update();
                 entities_update();
                 ent_skipped = 0;
-#ifdef PROF_EXPORT_STATICS
+#ifdef PROF_PASSLOG
                 pl_rec[pl_idx][5] = 2u;
 #endif
             } else {
@@ -387,33 +401,38 @@ void main(void) {
                 player_update();
                 collision_update();
                 ent_skipped = 1;
-#ifdef PROF_EXPORT_STATICS
+#ifdef PROF_PASSLOG
                 pl_rec[pl_idx][5] = 1u;
 #endif
             }
         } else {
             entities_update();
             ent_skipped = 0;
-#ifdef PROF_EXPORT_STATICS
+#ifdef PROF_PASSLOG
             pl_rec[pl_idx][5] = 0u;
 #endif
         }
-#ifdef PROF_EXPORT_STATICS
+#ifdef PROF_PASSLOG
         pl_rec[pl_idx][4] = LY_REG;     /* after the logic, before camera/OAM */
 #endif
         camera_follow();
         oam_camera();
-#ifdef PROF_EXPORT_STATICS
-        pl_rec[pl_idx][6] = LY_REG;
 #ifdef PROF_OAMCHECK
-        /* oam_camera must match the reference walk byte for byte (LESSONS 18). */
-        memcpy(pl_oam_a, shadow_OAM, sizeof pl_oam_a);
+        /* oam_camera must match the reference walk byte for byte (LESSONS 18), and
+         * drawing only the rows near the view must not change the hardware OAM. */
+        ent_check_oam(0u);
         oam_camera_slow();
-        pl_oam_n++;
-        if (memcmp(pl_oam_a, shadow_OAM, sizeof pl_oam_a) != 0) {
-            pl_oam_err++;
+        ent_check_oam(1u);
+        if (!ent_skipped) {
+            ent_check_redraw(HUD_SPLIT_SCANLINE);
+            oam_camera_slow();
+            ent_check_oam(2u);
+            ent_check_redraw(96u);
+            oam_camera_slow();
         }
 #endif
+#ifdef PROF_PASSLOG
+        pl_rec[pl_idx][6] = LY_REG;
         pl_idx = (uint8_t)((pl_idx + 1u) & (PASS_LOG_N - 1u));
 #endif
     }

@@ -45,7 +45,7 @@ Gearboy is the GB/GBC emulator with an MCP server. The folder is gitignored and 
 - **Profiler:** reports units of 70,224 per frame at any CPU speed. M-cycles = units / 4 in single speed, units / 2 in double speed (the ROM runs double). Recipe: `tests/gb/profile_play.mjs`.
 - **Speed:** fast-forward did not speed up headless runs, so keep benchmarks short.
 - **Shutdown:** stop the emulator process when finished.
-- **Client:** `tests/gb/gearboy_client.mjs`. Pacing tools: `tests/gb/profile_play.mjs` (profiler) and `tests/gb/pass_log.mjs` (per-pass scanline log); `tests/gb/run_emu.ps1` starts a fresh emulator for one of them (both need `.\build_gbc.ps1 -ProfExport`).
+- **Client:** `tests/gb/gearboy_client.mjs`. Pacing tools: `tests/gb/profile_play.mjs` (profiler) and `tests/gb/pass_log.mjs` (per-pass scanline log); `tests/gb/run_emu.ps1` starts a fresh emulator for one of them (both need `.\build_gbc.ps1 -ProfExport`; `pass_log` also `-PassLog`). `tests/gb/trace_prof.mjs` + `tools/trace_hist.py`: cycle-exact trace, per-phase and per-function cost (sees inside banked calls, which the profiler charges to `.call_hl`).
 - `tests/host_river.ps1` checks the C generator against `tools/river_model.py` on the host (needs `zig cc`). Run it after touching `river.c` generator code.
 
 ## Atari reverse engineering (dynamic analysis)

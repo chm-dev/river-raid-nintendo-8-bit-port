@@ -1,5 +1,5 @@
 /*
- * pass_log.mjs - read the per-pass ring of the -ProfExport ROM (pl_rec / pl_idx
+ * pass_log.mjs - read the per-pass ring of the -ProfExport -PassLog ROM (pl_rec / pl_idx
  * in gbc/main.c) after a few seconds of invulnerable play and print, for each
  * pass, how many scanlines the river part and the logic part used.
  *

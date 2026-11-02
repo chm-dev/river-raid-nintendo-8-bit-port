@@ -86,6 +86,14 @@ static const palette_color_t hud_pal_bar[2][4] = {
     { RGB(0, 0, 0), RGB(10, 10, 10), RGB(22, 4, 4), RGB(22, 4, 4) }
 };
 static uint8_t hud_warn_shown;
+/* What hud_want[] was last built from: it is a pure function of these, so a pass
+ * where none changed has nothing to do (20k units per call at the DMG clock). */
+static uint8_t hs_score[3];
+static uint8_t hs_lives;
+static uint8_t hs_bridge;
+static uint8_t hs_fuel;
+static uint8_t hs_warn;
+static uint8_t hs_attract = 1u;     /* attract, and the first call: always rebuild */
 
 static uint8_t hud_want[HUD_CELLS];
 static uint8_t hud_shown[HUD_CELLS];
@@ -217,6 +225,21 @@ static void hud_put_score(void) {
 }
 void hud_update(void) BANKED {
     uint8_t cell;
+
+    if (player_state != PLAYER_STATE_ATTRACT && !hs_attract &&
+        hs_fuel == (uint8_t)(hud_fuel >> 2) && hs_score[2] == hud_score_bcd[2] &&
+        hs_score[1] == hud_score_bcd[1] && hs_score[0] == hud_score_bcd[0] &&
+        hs_lives == hud_lives && hs_bridge == hud_bridge && hs_warn == sound_warn_on) {
+        return;
+    }
+    hs_attract = (player_state == PLAYER_STATE_ATTRACT) ? 1u : 0u;
+    hs_fuel = (uint8_t)(hud_fuel >> 2);
+    hs_score[0] = hud_score_bcd[0];
+    hs_score[1] = hud_score_bcd[1];
+    hs_score[2] = hud_score_bcd[2];
+    hs_lives = hud_lives;
+    hs_bridge = hud_bridge;
+    hs_warn = sound_warn_on;
 
     if (player_state == PLAYER_STATE_ATTRACT) {
         hu_src = hud_hi_bcd;            /* idle: HI label and the high score, white */

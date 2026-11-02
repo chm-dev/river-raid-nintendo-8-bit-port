@@ -74,13 +74,34 @@ static uint8_t ent_anim;
 static uint8_t msl_x;
 static uint8_t msl_y;
 static uint8_t msl_dx;
+#ifdef __SDCC_sm83
+/* A fast helicopter may exist (set by the spawner, cleared by the search in
+ * ent_missile_tick): most of the game has none, and the search costs ~1.5k units
+ * per tick at the DMG clock. */
+static uint8_t msl_heli;
+/* Only the view's lines reach the hardware OAM (gbc/main.c), so a sprite row above
+ * them need not be written.  A row skipped here at y < 96 is at most at y = 101
+ * after the one entities_follow() (RIVER_MAX_OWED = 6) before the next redraw:
+ * its bottom line 108 is still above the view (112). */
+#define ENT_DRAW_TOP_VIEW       96u
+typedef char ent_draw_top_assert[(ENT_DRAW_TOP_VIEW - 1u + 6u + 8u <= GBC_VIEW_TOP_SCANLINE) ? 1 : -1];
+#ifdef PROF_OAMCHECK
+static uint8_t ent_draw_top = ENT_DRAW_TOP_VIEW;    /* ent_check_redraw() also draws with the old limit */
+#define ENT_DRAW_TOP            ent_draw_top
+#else
+#define ENT_DRAW_TOP            ENT_DRAW_TOP_VIEW
+#endif
+#else
+#define msl_heli                1u
+#define ENT_DRAW_TOP            HUD_SPLIT_SCANLINE
+#endif
 static const uint8_t msl_tile[16] = { 0xF0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 
 /* Non-zero from the start of a game until the player first moves or fires: the river\n * scrolls in but the world (patrols, tanks, shells, wake-ups) stands still. */
 uint8_t ent_hold;
 uint8_t ent_paused;
 uint16_t ent_scrolled;                  /* rows scrolled since the game start (while held) */
-static uint8_t ent_oam_used;
+uint8_t ent_oam_used;
 
 /* File-scope scratch (SDCC aliases block locals across calls). */
 static uint8_t e_i;
@@ -764,6 +785,9 @@ void entities_row(void) BANKED {
         }
         if (e_i == MAX_ENTITIES) {
             sp_y = 10u;
+#ifdef __SDCC_sm83
+            msl_heli = 1u;
+#endif
         }
     }
 
@@ -1142,6 +1166,9 @@ static void ent_missile_tick(void) {
     }
     if (e_t == MAX_ENTITIES) {
         msl_dx = 0;
+#ifdef __SDCC_sm83
+        msl_heli = 0;
+#endif
         return;
     }
     if (msl_dx) {
@@ -1287,7 +1314,7 @@ static void ent_draw_bridge_debris(void) {
     e_c = (uint8_t)((e_type - ENT_AUX_EXPLODE_FIRST) * 12u);
     e_y = ent_y[e_i];
     for (e_t = 0; e_t < 3u; e_t++, e_y = (uint8_t)(e_y + 8u)) {
-        if (e_y < HUD_SPLIT_SCANLINE || e_y >= ENT_CULL_Y) {
+        if (e_y < ENT_DRAW_TOP || e_y >= ENT_CULL_Y) {
             continue;
         }
         for (e_cols = 0; e_cols < 4u; e_cols++) {
@@ -1445,6 +1472,12 @@ static void ent_draw_reg(void) {
 #endif
 
 static void ent_draw(void) {
+#ifdef __SDCC_sm83
+    /* Wholly above ENT_DRAW_TOP (24 rows at most, y >= 250 wraps to below 6). */
+    if ((uint8_t)(ent_y[e_i] + 6u) < (uint8_t)(ENT_DRAW_TOP + 6u - 24u)) {
+        return;
+    }
+#endif
     e_type = ent_type[e_i];
 #ifdef __SDCC_mos6502
     if (e_type > ENT_AUX_EXPLODE_LAST && e_type < ENT_AUX_TANK) {
@@ -1497,7 +1530,7 @@ static void ent_draw(void) {
         e_off = (uint8_t)(e_oam << 2);
     }
     for (e_t = 0; e_t < e_rows; e_t += 8u, e_y = (uint8_t)(e_y + 8u)) {
-        if (e_y < HUD_SPLIT_SCANLINE || e_y >= ENT_CULL_Y || e_off >= 176u) {
+        if (e_y < ENT_DRAW_TOP || e_y >= ENT_CULL_Y || e_off >= 176u) {
             e_tile = (uint8_t)(e_tile + e_cols);
             continue;
         }
@@ -1553,6 +1586,27 @@ void entities_follow(void) BANKED {
     __endasm;
 #endif
 }
+
+#ifdef PROF_OAMCHECK
+/* Redraw every entity with the given top limit, for the byte-for-byte check in gbc/main.c. */
+void ent_check_redraw(uint8_t top) BANKED {
+    ent_draw_top = top;
+    e_oam = ENT_OAM_FIRST;
+    for (e_t = ENT_OAM_TANK; e_t < ENT_OAM_MISSILE; e_t++) {
+        shadow_OAM[e_t].y = 240u;
+    }
+    for (e_i = 0; e_i < MAX_ENTITIES; e_i++) {
+        if (ent_type[e_i] != ENTITY_NONE && !(ent_type[e_i] == ENT_AUX_TANK && (ent_flags[e_i] & ENT_F_WAIT))) {
+            ent_draw();
+        }
+    }
+    while (ent_oam_used > e_oam) {
+        ent_oam_used--;
+        shadow_OAM[ent_oam_used].y = 240u;
+    }
+    ent_oam_used = e_oam;
+}
+#endif
 
 void entities_update(void) BANKED {
     /* This group runs on its own frame (main.c staggers it against the
@@ -1626,7 +1680,7 @@ void entities_update(void) BANKED {
             msl_dx = 0;
         }
     }
-    if (!river_freeze && !ent_hold) {
+    if (msl_heli && !river_freeze && !ent_hold) {
         for (e_n = 0; e_n < game_ticks; e_n++) {
             ent_missile_tick();
         }
@@ -1711,3 +1765,30 @@ void entities_update(void) BANKED {
     }
     ent_oam_used = e_oam;
 }
+
+#ifdef PROF_OAMCHECK
+/* The real hardware shadow, not the logic OAM this file writes (build_gbc.ps1 renames it). */
+#undef shadow_OAM
+extern volatile struct OAM_item_t shadow_OAM[];
+uint8_t pl_oam_a[160];
+uint16_t pl_oam_n, pl_oam_err, pl_oam_draw_err;
+
+/* what = 0: keep this pass's hardware OAM; 1 / 2: compare with it, count in the error counter. */
+void ent_check_oam(uint8_t what) BANKED {
+    for (e_t = 0; e_t < 160u; e_t++) {
+        if (what == 0u) {
+            pl_oam_a[e_t] = ((const uint8_t *)shadow_OAM)[e_t];
+        } else if (pl_oam_a[e_t] != ((const uint8_t *)shadow_OAM)[e_t]) {
+            if (what == 1u) {
+                pl_oam_err++;
+            } else {
+                pl_oam_draw_err++;
+            }
+            break;
+        }
+    }
+    if (what == 1u) {
+        pl_oam_n++;
+    }
+}
+#endif
