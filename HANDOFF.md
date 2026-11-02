@@ -2,7 +2,7 @@
 
 Short, current, rewritten every session. Rules are in `AGENTS.md`; **the plan is `PLAN_DMG.md`**; history is `PROGRESS.md` (grep it, do not read whole).
 
-**Last updated:** 2026-11-02 · **Branch:** `dmg-exact` (from `river-2600`) · **Phase:** the exact river on DMG is confirmed by the user, colours included. Nothing is waiting for a playtest.
+**Last updated:** 2026-11-02 · **Branch:** `dmg-exact` (from `river-2600`) · **Phase:** the exact river on DMG is confirmed by the user, colours included. Next: a single ROM for GBC and DMG, not started.
 
 ## Where we are
 
@@ -28,7 +28,7 @@ Short, current, rewritten every session. Rules are in `AGENTS.md`; **the plan is
 
 ## Next steps
 
-No work is planned until the user asks. The user's calls: merge `dmg-exact`, and the rare bottom-row clobber on the GBC exact ROM; the NES is unmeasured (`BUGS&FEATS.md`). Optional: boot time (~1.5-1.7 s blank), remaining peaks (`river_find_dup`, `river_copy_template`).
+**Next: one ROM for both GBC and DMG, before merging to `main`** (user, 2026-11-02). Do it on `dmg-exact`; the outline is in `PLAN_DMG.md` "Dual ROM". Not started. Merging is still the user's call, after this. The user's call too: the rare bottom-row clobber on the GBC exact ROM (the dual ROM's queue should fix it there); the NES is unmeasured (`BUGS&FEATS.md`). Optional: boot time (~1.5-1.7 s blank), remaining peaks (`river_find_dup`, `river_copy_template`).
 
 Stale (user, 2026-11-02; do not start unless asked): 2600 river work (Stage 1b steps 5-8, Stage 2), **smooth blocky edges** (`BUGS&FEATS.md`).
 

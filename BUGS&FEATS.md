@@ -7,6 +7,7 @@ Older lists: `archive/gbc/BUGS&FEATS.md`, `archive/nes/BUGS&FEATS.md`.
 - [ ] **GBC exact ROM: rare wrong tiles in the bottom ~10 px of the view** (found 2026-11-02 by `tests/host_tile_budget.ps1` on the host, not seen in play). The 250-slot cache is reused while a row is still on screen: 67-151 cells per 60,000 tile rows, age 27-28 rows; 266 slots would be needed. The NES ROM has the same row lifetime by geometry, but uploads through its VBlank buffer and shows a different view: not measured. Not fixed: the user decides whether it matters. The DMG ROM does not have it.
 
 # FEATURES
+- [ ] **One ROM for both GBC and DMG: next, before merging to `main`** (user, 2026-11-02). Outline in `PLAN_DMG.md` "Dual ROM".
 - [x] **Exact river on DMG** (`PLAN_DMG.md`). `roms/river_raid_dmg.gb`, delay queue and shared tiles, no art cut. The user's playtest, 2026-11-02: "absolutely flawless", every checklist item passes. Not merged; that is the user's call.
 - [x] **DMG colours, user's request after that playtest:** FUEL in dark and light grey; balloon light grey with a dark grey stripe and basket. Enemy jets stay dark. Confirmed by the user, 2026-11-02.
 - [x] **Sprite Y position** (carried over from the GBC list). Confirmed by the user, 2026-11-02.

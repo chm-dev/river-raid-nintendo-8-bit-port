@@ -94,6 +94,19 @@ See the budget above.
 - `-Dmg -River2600` builds (bank 0 ends `$394E`) but has never run, and its ring is unmeasured.
 - Boot on the DMG ROM takes ~1.5-1.7 s with a blank screen (measured in Gearboy); the tile sharing is part of it.
 
+## Dual ROM: next, before merging to `main` (user, 2026-11-02; not started)
+
+One ROM that is the full GBC game on a GBC and the DMG game on a DMG. An outline from reading the code, nothing built or measured yet:
+
+- **Header and boot:** `$0143 = $80`. Branch on `_cpu == CGB_TYPE`: double speed and colour palettes, or single speed and `BGP`/`OBP0`/`OBP1`. The build check must accept `$80`.
+- **Turn `PLATFORM_DMG` (32 lines in 8 files) into runtime branches or shared code.** Keep hot paths free of checks.
+- **VRAM layout:** the DMG layout on both, so the GBC cache goes from 250 to 226 slots, with the queue on both. The GBC HUD's 10 white digits can stay in bank 1. LCDC bit 4 clear on both.
+- **OAM attributes:** one byte can serve both, as a DMG ignores bit 3 and a GBC in colour mode ignores bit 4. `dmg_tile_map` becomes identity on a GBC, or the GBC uploads through the same allocator.
+- **Hardest part:** the GBC's per-row attributes (land flip, road colour) must go through the queue with their row, and `river_slot_attr` with them. `river_vram_copy_asm` was reasoned for single speed; check it at double speed too.
+- **Sprite recolouring** (balloon, enemy jet) runs on a DMG only, and the GBC keeps the original `ent_gfx_pal`, so that table's DMG variant becomes a runtime choice.
+- **Bank 0:** about 1.7 KB free in the GBC build. Move code to a higher bank if it does not fit; check the `.map`.
+- **Verification:** the GBC ROM can no longer be byte-identical, so that proof goes. Compare against today's ROMs as reference: `host_river_queue.ps1`, profile against `river_raid` (1.00 / 1.00 / 1.00) and `river_raid_dmg` (0.99-1.00 / 0.98 / 0.96), `-OamCheck`, `-RiverCheck`, `sprite_check.mjs` and `dmg_check.mjs` in both modes, screenshots with colours on GBC. **Both modes need the user's playtest.** The NES ROM must stay byte-identical. Gearboy's `ForceDMG` in `config.ini`, or the detection for a `$80` ROM, needs finding out: a dual ROM may boot as CGB by default.
+
 ## If it does not work
 
 Fallback order, the user decides: simplify the river's features (fewer unique tiles), then `-River2600` on the same DMG plumbing (32 atlas tiles, 210-slot exact ring for islands and roads, and that ring would need the same measurement), then stay GBC only.

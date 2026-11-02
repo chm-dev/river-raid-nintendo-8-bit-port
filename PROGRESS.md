@@ -55,3 +55,7 @@ Append-only. Do not read whole; grep for a keyword and read the matching `### da
 ### 2026-11-02 - User confirms the rest; 2600 river and smooth edges stale (branch `dmg-exact`)
 
 - The user confirmed the DMG colours, the high-score save and the sprite Y position. Marked `[x]` in `BUGS&FEATS.md`. The user made 2600 river mode and smooth blocky edges stale (new status `[-]`); no code changed, `-River2600` stays.
+
+### 2026-11-02 - Next task set: one ROM for GBC and DMG (branch `dmg-exact`)
+
+- The user wants a single ROM supporting both, before merging to `main`. Outline in `PLAN_DMG.md` "Dual ROM"; not started, no code changed.
