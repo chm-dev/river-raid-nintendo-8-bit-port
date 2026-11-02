@@ -108,10 +108,57 @@ static uint8_t rg_ysave;
  * direction when $C3 is 0 and never moves again until it flips, and it zeroes the
  * bridge walk table at $BA8F.  The banks stay straight and the river changes width
  * by ramps. */
+#ifdef RIVER_BLOCKY
+#ifndef RIVER_2600
+#define RIVER_2600
+#endif
+#ifndef RIVER_GRID
+#define RIVER_GRID          8u
+#endif
+#endif
+#if defined(RIVER_FAST) && !defined(RIVER_BLOCKY)
+#error RIVER_FAST needs RIVER_BLOCKY
+#endif
+#if defined(RIVER_BLOCKY) && defined(__SDCC_mos6502)
+#error RIVER_BLOCKY is not implemented for the NES renderer
+#endif
 #ifdef RIVER_2600
 #define RIVER_NIB_PASS      0xEAu
 #else
 #define RIVER_NIB_PASS      8u
+#endif
+
+/* -DRIVER_BLOCKY: the plain river's edges sit on a RIVER_GRID-pixel grid (4 or 8) and the
+ * ramps move one grid step every RIVER_GRID rows (the 2600 playfield is 4 pixels wide), so
+ * the edge tiles come from a small atlas.  tools/river_model.py has the same (RIVER_BLOCKY,
+ * RIVER_GRID).  Island rows keep the exact geometry. */
+#ifdef RIVER_BLOCKY
+#define RIVER_Q(v)          ((uint8_t)((v) & (uint8_t)~(RIVER_GRID - 1u)))
+#else
+#define RIVER_Q(v)          (v)
+#endif
+
+/* -DRIVER_FAST (GBC): the first RIVER_ATLAS_N cache slots hold the edge atlas, the
+ * rotating exact cache uses the rest (see "Band fast path"). */
+#ifdef RIVER_FAST
+#ifndef RIVER_ATLAS_N
+#define RIVER_ATLAS_N       96u
+#endif
+#define RIVER_RING_FIRST    RIVER_ATLAS_N
+#else
+#define RIVER_RING_FIRST    0u
+#endif
+
+/* A row that carries a feature template (house, tree...) on its banks.
+ * -DRIVER_NOFEAT keeps the generator state (so the sequence is unchanged) but
+ * draws no decoration: 2600 mode, GBC only. */
+#ifdef RIVER_NOFEAT
+#ifdef __SDCC_mos6502
+#error RIVER_NOFEAT is not implemented for the NES renderer
+#endif
+#define RG_DECOR_ROW        0
+#else
+#define RG_DECOR_ROW        (rg_feature && rg_rowcount < rg_be)
 #endif
 
 /* The 32-entry bank-walk table at $BA8F. */
@@ -1023,10 +1070,10 @@ static void river_render_row(void) {
     rg_row_island_right = 0;
 
     /* --- left bank and left-side feature ----------------------------- */
-    x = island ? rg_left : (uint8_t)(rg_left + rg_phase);
+    x = island ? rg_left : RIVER_Q((uint8_t)(rg_left + rg_phase));
     rg_row_left = x;
     y = (uint8_t)((x >> 2) - 1u);
-    if (!island && (rg_feature & 0x80u) && rg_rowcount < rg_be) {
+    if (!island && (rg_feature & 0x80u) && RG_DECOR_ROW) {
         rg_ysave = y;
         y = rg_bd;
         river_fill(y, 0x55u);
@@ -1037,7 +1084,7 @@ static void river_render_row(void) {
     river_pattern((uint8_t)((x & 3u) * 4u));
 
     /* --- island / right bank ----------------------------------------- */
-    a = rg_width;
+    a = island ? rg_width : RIVER_Q(rg_width);
     if (island) {
         if (rg_phase < 6u) {
             a = (uint8_t)(rg_width + rg_phase + rg_phase);
@@ -1062,7 +1109,7 @@ static void river_render_row(void) {
                 river_fill(y, 0xAAu);
                 river_pattern((uint8_t)((x & 3u) * 4u + 0x10u));
             } else {
-                if (rg_feature && rg_rowcount < rg_be) {
+                if (RG_DECOR_ROW) {
                     b7 = (uint8_t)(rg_bd - rg_row_pos);
                     y = (uint8_t)(y - b7 - rg_bc);
                     rg_ysave = y;
@@ -1088,8 +1135,7 @@ static void river_render_row(void) {
 
     /* --- right-side feature and right land --------------------------- */
     y = (uint8_t)(0x30u - rg_row_pos);
-    if (!island && rg_feature && !(rg_feature & 0x80u) &&
-        rg_rowcount < rg_be) {
+    if (!island && RG_DECOR_ROW && !(rg_feature & 0x80u)) {
         y = (uint8_t)(y - rg_bd - rg_bc);
         y++;
         river_fill(y, 0x55u);
@@ -1110,6 +1156,18 @@ static void river_render_row(void) {
  * repeat of it. */
 static uint8_t rs_left, rs_phase, rs_width, rs_isl;
 static uint8_t rg_same;
+
+#ifdef RIVER_FAST
+/* Band fast path (2600 mode).  The two edges of each plain row are recorded
+ * (rb_L/rb_R, one per raw row of the pending tile row); river_fast_cols() turns
+ * a regular band straight into tile ids.  river_band_replay() renders and
+ * converts the recorded rows exactly when the band cannot be done that way. */
+static uint8_t rb_L[8], rb_R[8];
+static uint8_t rb_mask;                 /* bit k: raw row k of the pending band was recorded, not rendered */
+static uint8_t rg_fastrow;              /* the row just stepped was recorded, not rendered */
+static uint8_t river_road_left;         /* raw rows until the road ends (see below) */
+static void river_band_replay(void);
+#endif
 
 static void river_step_state(void) {
     rg_b5 = (rg_level < 9u) ? 6u : 0u;
@@ -1146,8 +1204,20 @@ static void river_step_state(void) {
         int8_t v = rg_v35;
         if ((v > 0 && rg_phase < rg_target) ||
             (v < 0 && rg_phase > rg_target)) {
+#ifdef RIVER_BLOCKY
+            if (!(rg_rowcount & (RIVER_GRID - 1u))) {
+                int16_t nv = (int16_t)rg_phase + (int16_t)v * (int16_t)RIVER_GRID;
+
+                if ((v > 0 && nv > (int16_t)rg_target) || (v < 0 && nv < (int16_t)rg_target)) {
+                    nv = (int16_t)rg_target;
+                }
+                rg_width = (uint8_t)(rg_width - (uint8_t)(2 * (nv - (int16_t)rg_phase)));
+                rg_phase = (uint8_t)nv;
+            }
+#else
             rg_phase = (uint8_t)(rg_phase + v);
             rg_width = (uint8_t)(rg_width - (uint8_t)(2 * v));
+#endif
         } else {
             rg_v35 = 0;
         }
@@ -1231,7 +1301,28 @@ static void river_step_state(void) {
      * row buffer and the ring fields rg_row_* still hold the right values and
      * the renderer is skipped. */
     rg_same = 0;
-    if (rg_feature && rg_rowcount < rg_be) {
+#ifdef RIVER_FAST
+    rg_fastrow = 0;
+    if (!(rg_island_flags & 0x80u) && river_road_left == 0u && !RG_DECOR_ROW) {
+        /* A plain row: only its two edges matter.  Record them; the band of eight
+         * rows becomes tile ids without ever being rendered (river_fast_cols), or
+         * is rendered afterwards when it turns out irregular (river_band_replay). */
+        rg_row_left = RIVER_Q((uint8_t)(rg_left + rg_phase));
+        rg_row_right = (uint8_t)(rg_row_left + RIVER_Q(rg_width));
+        rg_row_island_left = 0;
+        rg_row_island_right = 0;
+        rb_L[river_block_index] = rg_row_left;
+        rb_R[river_block_index] = rg_row_right;
+        rb_mask |= (uint8_t)(1u << river_block_index);
+        rg_fastrow = 1u;
+        rs_isl = 0xFFu;                 /* the raw row buffer does not hold this row */
+        return;
+    }
+    if (rb_mask) {
+        river_band_replay();
+    }
+#endif
+    if (RG_DECOR_ROW) {
         rs_isl = 0xFFu;
         river_render_row();
     } else if (rs_isl == (uint8_t)(rg_island_flags & 0x80u) && rs_left == rg_left &&
@@ -2163,7 +2254,218 @@ static void river_job_solids(void) {
 #define RIVER_STRIPE_COLS   3u          /* budget the stripe write is worth */
 static uint8_t river_job_left;
 
+#ifdef RIVER_FAST
+/* ------------------------------------------------------------------------- */
+/* Band fast path (2600 mode)                                                */
+/* ------------------------------------------------------------------------- */
+/*
+ * With blocky edges (RIVER_BLOCKY) each edge of a plain tile row is constant, or
+ * jumps by a grid step at the end of the band (grid 8: after row 6; grid 4: also
+ * after row 2).  Every tile column is then land, water, or an edge tile that
+ * depends only on (side, x of the edge inside the column, the jumps).  Those are
+ * built once by the exact renderer (river_atlas_build) into a fixed atlas of cache
+ * slots and found by table lookup afterwards, so a regular band costs no
+ * rendering, no conversion and no duplicate search.  Anything else (island,
+ * road, a band that is not of this shape, a full atlas) takes the exact path, so
+ * the picture is always the exact one.
+ *
+ * An edge's pattern covers the 8 pixels that start at the byte left of its pixel
+ * x: [x - 7, x + 3] counting the pixel phase; AF_BEFORE/AF_AFTER pad that.
+ */
+#ifndef AF_BEFORE
+#define AF_BEFORE       7
+#endif
+#ifndef AF_AFTER
+#define AF_AFTER        3
+#endif
+#define AF_JUMP_MAX     (2 * (int16_t)RIVER_GRID)       /* largest single jump: slope 2 */
+#define AF_JUMP_N       5                               /* jumps -2..+2 grid steps */
+#define AF_SHIFT        ((RIVER_GRID == 8u) ? 3 : 2)
+#define AF_DL_MIN       (-24)                           /* x of the edge inside its column, row 0 */
+#define AF_DL_N         15                              /* -24..32 in grid steps (4 or 8) */
+#define AF_TILE_COL     3u              /* column the atlas tile is built in */
+/* Atlas slot of [side][jump at row 2][jump at row 6][dl]; 0 = not built.  Grid 8
+ * never jumps at row 2, grid 4 does. */
+static uint8_t af_id[2][AF_JUMP_N][AF_JUMP_N][AF_DL_N];
+static uint8_t af_next;                 /* atlas slots used */
+static int16_t af_j1, af_j2;            /* jumps of the pending band's edge (set per side) */
+static int16_t af_jL1, af_jL2, af_jR1, af_jR2;
+static uint8_t rj_fast;                 /* the pending tile row takes the fast path */
+uint16_t river_fast_bands;              /* tile rows done by the fast path / by the exact path (profiling) */
+uint16_t river_slow_bands;
+uint16_t river_slow_why[3];             /* ... because: a row was not plain / odd edge shape / atlas full */
+static uint8_t af_side, af_k, af_xv;
+static int16_t af_x;                    /* x of the edge in the atlas column, row 0 */
+static uint8_t af_sv_left, af_sv_phase, af_sv_width, af_sv_rl, af_sv_rr;
+static int16_t af_lo, af_hi, af_lmin, af_lmax, af_rmin, af_rmax;
+
+/* Render and convert the recorded rows exactly, as the plain renderer would
+ * have.  Saves and restores the generator fields the renderer reads. */
+static void river_band_replay(void) {
+    af_sv_left = rg_left;
+    af_sv_phase = rg_phase;
+    af_sv_width = rg_width;
+    af_sv_rl = rg_row_left;
+    af_sv_rr = rg_row_right;
+    for (af_k = 0; af_k < 8u; af_k++) {
+        if (!(rb_mask & (uint8_t)(1u << af_k))) {
+            continue;
+        }
+        rg_left = rb_L[af_k];
+        rg_phase = 0u;
+        rg_width = (uint8_t)(rb_R[af_k] - rb_L[af_k]);
+        river_render_row();
+        river_convert_row((uint8_t)(7u - af_k));
+    }
+    rg_left = af_sv_left;
+    rg_phase = af_sv_phase;
+    rg_width = af_sv_width;
+    rg_row_left = af_sv_rl;
+    rg_row_right = af_sv_rr;
+    rb_mask = 0u;
+    rs_isl = 0xFFu;
+}
+
+/* Build one atlas tile into river_tile_pat[rj_c]: eight synthetic rows with a
+ * single edge at af_x (+ af_j1 from row 3, + af_j2 from row 7), rendered and
+ * converted by the exact code. */
+static void river_atlas_build(void) {
+    af_sv_left = rg_left;
+    af_sv_phase = rg_phase;
+    af_sv_width = rg_width;
+    af_sv_rl = rg_row_left;
+    af_sv_rr = rg_row_right;
+    rg_phase = 0u;
+    for (af_k = 0; af_k < 8u; af_k++) {
+        af_xv = (uint8_t)(af_x + ((af_k >= 3u) ? af_j1 : 0) + ((af_k >= 7u) ? af_j2 : 0));
+        if (af_side == 0u) {
+            rg_left = af_xv;                /* left edge here, right edge far away */
+            rg_width = 100u;
+        } else {
+            rg_left = 0u;                   /* left edge off the picture */
+            rg_width = af_xv;
+        }
+        river_render_row();
+        river_convert_row((uint8_t)(7u - af_k));
+    }
+    if (rj_c != AF_TILE_COL) {
+        memcpy(&river_tile_pat[(uint16_t)rj_c * 16u], &river_tile_pat[(uint16_t)AF_TILE_COL * 16u], 16u);
+    }
+    river_reset_kinds();
+    rg_left = af_sv_left;
+    rg_phase = af_sv_phase;
+    rg_width = af_sv_width;
+    rg_row_left = af_sv_rl;
+    rg_row_right = af_sv_rr;
+    rs_isl = 0xFFu;
+}
+
+/* Jumps of one recorded edge (rows 3 and 7), or 0 when it moves anywhere else or by more than a
+ * slope-2 step.  Sets af_j1/af_j2. */
+static uint8_t river_edge_jumps(const uint8_t *e) {
+    for (af_k = 1u; af_k < 8u; af_k++) {
+        if (af_k != 3u && af_k != 7u && e[af_k] != e[af_k - 1u]) {
+            return 0u;
+        }
+    }
+    af_j1 = (int16_t)e[3] - (int16_t)e[2];
+    af_j2 = (int16_t)e[7] - (int16_t)e[6];
+#if RIVER_GRID == 8
+    if (af_j1) {
+        return 0u;
+    }
+#endif
+    return (uint8_t)(af_j1 >= -AF_JUMP_MAX && af_j1 <= AF_JUMP_MAX &&
+                     af_j2 >= -AF_JUMP_MAX && af_j2 <= AF_JUMP_MAX);
+}
+
+/* Is the pending band of the shape the atlas covers?  Sets the jumps and extents. */
+static uint8_t river_band_regular(void) {
+    if (!river_edge_jumps(rb_L)) {
+        return 0u;
+    }
+    af_jL1 = af_j1;
+    af_jL2 = af_j2;
+    if (!river_edge_jumps(rb_R)) {
+        return 0u;
+    }
+    af_jR1 = af_j1;
+    af_jR2 = af_j2;
+    af_lmin = af_lmax = rb_L[0];
+    af_rmin = af_rmax = rb_R[0];
+    for (af_k = 1u; af_k < 8u; af_k++) {
+        if ((int16_t)rb_L[af_k] < af_lmin) af_lmin = rb_L[af_k];
+        if ((int16_t)rb_L[af_k] > af_lmax) af_lmax = rb_L[af_k];
+        if ((int16_t)rb_R[af_k] < af_rmin) af_rmin = rb_R[af_k];
+        if ((int16_t)rb_R[af_k] > af_rmax) af_rmax = rb_R[af_k];
+    }
+    /* No tile column may be touched by both edges (river_fast_cols tests the left
+     * one first), and rows may not wrap. */
+    return (uint8_t)(((af_lmax + AF_AFTER) >> 3) < ((af_rmin - AF_BEFORE) >> 3) && af_rmax < 250);
+}
+
+/* Fill river_row_ids for the columns from river_job_col on.  0 when it has to
+ * yield (budget spent or transfer buffer full); it resumes at the same column. */
+static uint8_t river_fast_cols(void) {
+    int16_t dl;
+    uint8_t touched;
+    uint8_t *slot;
+
+    while (river_job_col < RIVER_TILE_COLS) {
+        rj_c = river_job_col;
+        af_lo = (int16_t)rj_c * 8;
+        af_hi = af_lo + 7;
+        touched = 0u;
+        if (af_lo <= af_lmax + AF_AFTER && af_hi >= af_lmin - AF_BEFORE) {
+            af_side = 0u;
+            af_j1 = af_jL1;
+            af_j2 = af_jL2;
+            dl = (int16_t)rb_L[0] - af_lo;
+            touched = 1u;
+        } else if (af_lo <= af_rmax + AF_AFTER && af_hi >= af_rmin - AF_BEFORE) {
+            af_side = 1u;
+            af_j1 = af_jR1;
+            af_j2 = af_jR2;
+            dl = (int16_t)rb_R[0] - af_lo;
+            touched = 1u;
+        }
+        if (!touched) {
+            river_row_ids[rj_c] = (af_hi < af_lmin - AF_BEFORE || af_lo > af_rmax + AF_AFTER)
+                ? TILE_LAND : TILE_WATER;
+        } else {
+            slot = &af_id[af_side][(af_j1 / (int16_t)RIVER_GRID) + 2][(af_j2 / (int16_t)RIVER_GRID) + 2]
+                         [(dl - AF_DL_MIN) >> AF_SHIFT];
+            rj_id = *slot;
+            if (!rj_id) {
+                if (!river_job_left) {
+                    return 0u;
+                }
+                river_job_left--;
+                af_x = (int16_t)AF_TILE_COL * 8 + dl;
+                river_atlas_build();
+                rj_id = (uint8_t)(TILE_RIVER_BASE + af_next);
+                if (!river_emit_pattern()) {
+                    return 0u;
+                }
+                af_next++;
+                *slot = rj_id;
+            }
+            river_row_ids[rj_c] = rj_id;
+        }
+        river_job_col++;
+    }
+    return 1u;
+}
+#endif
+
 static void river_run_job(void) {
+#ifdef RIVER_FAST
+    if (rj_fast) {
+        if (!river_fast_cols()) {
+            return;
+        }
+    } else
+#endif
     for (;;) {
         river_job_solids();
         if (river_job_col >= RIVER_TILE_COLS) {
@@ -2182,7 +2484,7 @@ static void river_run_job(void) {
             }
             river_alloc++;
             if (river_alloc >= TILE_RIVER_COUNT) {
-                river_alloc = 0u;
+                river_alloc = RIVER_RING_FIRST;
             }
         }
         river_row_ids[rj_c] = rj_id;
@@ -2209,6 +2511,9 @@ static void river_run_job(void) {
     river_job_margin = 0u;
     river_reset_kinds();
     river_job = 0u;
+#ifdef RIVER_FAST
+    rj_fast = 0u;
+#endif
 }
 
 /* ------------------------------------------------------------------------- */
@@ -2275,6 +2580,11 @@ static void river_generate_raw_row(void) {
     /* The Atari playfield is stored bottom-up relative to its display:
      * raw row 7 is the top scanline of the NES tile.  Reversing the row
      * order here inverts the whole playfield (trees included). */
+#ifdef RIVER_FAST
+    if (rg_fastrow) {
+        /* recorded, not rendered: nothing to convert */
+    } else
+#endif
     if (rg_same && river_block_index != 0u) {
         river_copy_line((uint8_t)(7u - river_block_index));
     } else {
@@ -2322,6 +2632,26 @@ static void river_finish_tile_row(void) {
     if (river_flip_age != 0xFFu) {
         river_flip_age++;
     }
+#ifdef RIVER_FAST
+    rj_fast = 0u;
+    if (rb_mask != 0xFFu) {
+        river_slow_why[0]++;
+    } else if ((uint8_t)(af_next + 8u) > RIVER_ATLAS_N) {
+        river_slow_why[2]++;
+    } else if (!river_band_regular()) {
+        river_slow_why[1]++;
+    }
+    if (rb_mask == 0xFFu && (uint8_t)(af_next + 8u) <= RIVER_ATLAS_N && river_band_regular()) {
+        rj_fast = 1u;
+        rb_mask = 0u;
+        river_fast_bands++;
+    } else {
+        river_slow_bands++;
+        if (rb_mask) {
+            river_band_replay();
+        }
+    }
+#endif
     river_job = 1u;
     river_job_col = 0u;
     river_block_index = 0;
@@ -2354,6 +2684,13 @@ static void river_start(uint8_t restart, uint8_t bridges) {
     rs_isl = 0xFFu;                     /* no rendered row to repeat yet */
     rg_same = 0u;
     river_init_tiles();
+#ifdef RIVER_FAST
+    memset(af_id, 0, sizeof(af_id));    /* the atlas is rebuilt on demand */
+    af_next = 0u;
+    rb_mask = 0u;
+    rj_fast = 0u;
+    river_alloc = RIVER_RING_FIRST;
+#endif
 
     for (i = 0; i < RIVER_ROWS; i++) {
         river_left_x[i] = 3u;
@@ -2605,7 +2942,7 @@ uint8_t river_owed_max;
 #define RIVER_ENT_BUMP_MAX  9u
 
 void river_update(void) {
-#ifndef __SDCC_sm83
+#if !defined(__SDCC_sm83) && !defined(RIVER_HOST_DIRECT)
     /* GBC keeps the direct set_bkg_data / set_vram_byte path: river_put() is a
      * no-op on the C paths, so the "live" buffer path would drop every upload. */
     river_live = 1u;

@@ -37,7 +37,11 @@ def rom(a: int, n: int) -> bytes:
 NIB_PASS = ROM[0x89F]
 # RIVER_2600=1 applies the mod's generator behaviour to the original cart's tables, so the
 # host check can compare the C build (-DRIVER_2600) without the mod's texture changes.
-MODE_2600 = bool(os.environ.get("RIVER_2600"))
+# RIVER_BLOCKY=1 (implies RIVER_2600): the river edges sit on a GRID-pixel grid (RIVER_GRID, 4 or 8) and
+# the ramps move one GRID step every GRID rows, like the 2600 playfield.  tests/host_river.ps1 -Blocky.
+BLOCKY = bool(os.environ.get("RIVER_BLOCKY"))
+GRID = int(os.environ.get("RIVER_GRID") or 4)       # edge grid in pixels: 4 or 8
+MODE_2600 = bool(os.environ.get("RIVER_2600")) or BLOCKY
 if MODE_2600:
     NIB_PASS = 0xEA
 # $A977 is the operand of "and #$20" at $A976 (feature spawn test); the mod makes it $27.
@@ -324,6 +328,8 @@ class RiverState:
 
         # --- left bank and left-side feature ----------------------------- #
         x = self.left if island else _b(self.left + self.phase)
+        if BLOCKY and not island:
+            x &= ~(GRID - 1) & 0xFF
         y = (x >> 2) - 1
         if (not island) and (self.feature & 0x80) and (self.rowcount < self.be):
             ysave = y
@@ -336,6 +342,8 @@ class RiverState:
 
         # --- island / right bank ----------------------------------------- #
         a = self.width
+        if BLOCKY and not island:
+            a &= ~(GRID - 1) & 0xFF
         if island:
             if self.phase < 6:
                 a = _b(self.width + self.phase + self.phase)
@@ -425,8 +433,17 @@ class RiverState:
             v = _s(self._v35)
             # A7FB: move only while the phase is still approaching the target.
             if (v > 0 and self.phase < self._target) or (v < 0 and self.phase > self._target):
-                self.phase = _b(self.phase + v)
-                self.width = _b(self.width - 2 * v)
+                if not BLOCKY:
+                    self.phase = _b(self.phase + v)
+                    self.width = _b(self.width - 2 * v)
+                elif self.rowcount % GRID == 0:
+                    # one GRID-pixel step per GRID rows, never past the target
+                    nv = self.phase + GRID * v
+                    if (v > 0 and nv > self._target) or (v < 0 and nv < self._target):
+                        nv = self._target
+                    d = nv - self.phase
+                    self.phase = _b(nv)
+                    self.width = _b(self.width - 2 * d)
             else:
                 self._v35 = 0
 
