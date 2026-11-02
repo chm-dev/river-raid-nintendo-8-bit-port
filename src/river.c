@@ -1427,8 +1427,10 @@ static void river_cache_init(void) {
     set_bkg_data(TILE_LAND, 1, river_land_pat);
     set_bkg_data(TILE_WATER, 1, river_water_pat);
     set_bkg_data(TILE_BLACK, 1, river_black_pat);
+#ifndef PLATFORM_DMG                    /* margins only: those ids are the HUD's on a DMG */
     set_bkg_data(TILE_ROAD_A, 1, river_road_a_pat);
     set_bkg_data(TILE_ROAD_B, 1, river_road_b_pat);
+#endif
     river_alloc = 0u;
 }
 
@@ -2296,7 +2298,7 @@ static uint8_t river_road_slot;       /* first (odd) slot of the road, or 0xFF *
 static uint8_t river_road_stage;      /* margin/attribute writes done for the job */
 static uint8_t river_land_alt;        /* land colour: 0 = $D2, 1 = $D6 */
 static uint8_t river_job_pal;         /* BG palette of the pending tile row */
-#ifdef __SDCC_sm83
+#if defined(__SDCC_sm83) && !defined(PLATFORM_DMG)
 static uint8_t river_slot_attr[RIVER_RING_ROWS];   /* BG attribute last written per map row */
 #endif
 static uint8_t river_flip_age;        /* tile rows since the land colour flipped (255 = long ago) */
@@ -2311,8 +2313,181 @@ static uint16_t rj_addr;
 static const uint8_t *rj_pc, *rj_pk;
 #endif
 
+#ifdef PLATFORM_DMG
+/* Delay queue.  The logic runs in NES coordinates, so a row is finished 98 px above the GB view
+ * and a cache slot would be held for 28 tile rows: 266 slots.  Here a finished row waits in WRAM
+ * and goes to VRAM only when it is RQ_DUE px above the view, which needs 206 (PLAN_DMG.md task 1).
+ * The generator, the spawner and collision do not notice.  Slots are still picked in order, in
+ * the job, so uploads reach them in the same order. */
+#define RQ_TILES        128u            /* >= the 118 uploads of 11 tile rows, measured peak */
+#define RQ_ROWS         12u
+#define RQ_DUE          32u             /* px from the row's top to the view top: view_off 16 */
+#define RQ_URGENT       16u             /* ... from here the heavy entity pass uploads as well */
+#define RQ_PASS_TILES   8u              /* tiles one pass may upload */
+#define RQ_STRIPE_COST  3u              /* ... of which a row's map write is worth */
+#ifndef GBC_VIEW_TOP_SCANLINE
+#define GBC_VIEW_TOP_SCANLINE 112u      /* host build */
+#endif
+#define RQ_VIEW_OFF     (GBC_VIEW_TOP_SCANLINE - PLAYFIELD_SCANLINE)
+typedef char rq_tiles_power_of_2[(RQ_TILES & (RQ_TILES - 1u)) == 0u ? 1 : -1];
+#ifdef __SDCC_sm83
+uint8_t __at(DMG_RQ_PAT_ADDR) rq_pat[RQ_TILES * 16u];   /* too big for _DATA below the OAM page */
+#else
+static uint8_t rq_pat[RQ_TILES * 16u];
+#endif
+static uint8_t rq_id[RQ_TILES];
+static uint8_t rq_row_slot[RQ_ROWS];
+static uint8_t rq_row_n[RQ_ROWS];       /* patterns of the row still to upload */
+static uint8_t rq_row_ids[RQ_ROWS][RIVER_TILE_COLS];
+static uint8_t rq_ph, rq_pt, rq_pn;     /* pattern ring: head, tail, count */
+static uint8_t rq_rh, rq_rt, rq_rn;     /* row ring */
+static uint8_t rq_new;                  /* patterns of the row being built */
+static uint8_t rq_budget, rq_d, rq_n;
+
+static void river_queue_reset(void) {
+    rq_ph = rq_pt = rq_pn = 0u;
+    rq_rh = rq_rt = rq_rn = 0u;
+    rq_new = 0u;
+}
+
+#ifdef __SDCC_sm83
+static const uint8_t *rq_src;
+static uint8_t *rq_dst;
+#ifdef PROF_RIVERCHECK
+extern uint16_t rchk_err;
+#endif
+
+/* Copy rq_n bytes (even) from rq_src to VRAM at rq_dst; a C loop with a STAT test per byte cost
+ * 3.8k units per tile, this 1.8k with the wait.  At single speed two writes fit per test: !BUSY
+ * means mode 0 or 1 and mode 2 leaves VRAM open for 20 M-cycles more, and the second write is 16
+ * after the sample.  No interrupt lands between: the LCD handler returns in HBlank, the VBlank
+ * handler in VBlank.  DE = source, HL = destination, B = pairs. */
+static void river_vram_copy_asm(void) {
+    __asm
+        ld      a, (_rq_n)
+        rrca
+        ld      b, a
+        ld      a, (_rq_src)
+        ld      e, a
+        ld      a, (_rq_src + 1)
+        ld      d, a
+        ld      a, (_rq_dst)
+        ld      l, a
+        ld      a, (_rq_dst + 1)
+        ld      h, a
+    1$:
+        ldh     a, (_STAT_REG)
+        and     a, #2               ; STATF_BUSY
+        jr      NZ, 1$
+        ld      a, (de)
+        inc     de
+        ld      (hl+), a
+        ld      a, (de)
+        inc     de
+        ld      (hl+), a
+        dec     b
+        jr      NZ, 1$
+    __endasm;
+}
+typedef char rq_copy_consts[(STATF_BUSY == 2u) ? 1 : -1];
+
+/* The reference is the source itself: -RiverCheck reads the bytes back from VRAM. */
+static void river_vram_copy(void) {
+    river_vram_copy_asm();
+#ifdef PROF_RIVERCHECK
+    {
+        const uint8_t *s = rq_src, *d = rq_dst;
+
+        for (; rq_n != 0u; rq_n--, s++, d++) {
+            while (STAT_REG & STATF_BUSY) {
+            }
+            if (*d != *s) {
+                rchk_err++;
+            }
+        }
+    }
+#endif
+}
+#endif
+
+/* One queued pattern to its cache slot.  The BG ids need the LCDC bit 4 clear addressing. */
+static void river_drain_tile(void) {
+#ifdef __SDCC_sm83
+    rq_dst = (uint8_t *)((rq_id[rq_pt] < 128u) ? (0x9000u + ((uint16_t)rq_id[rq_pt] << 4))
+                                               : (0x8000u + ((uint16_t)rq_id[rq_pt] << 4)));
+    rq_src = &rq_pat[(uint16_t)rq_pt << 4];
+    rq_n = 16u;
+    river_vram_copy();
+#else
+    set_bkg_data(rq_id[rq_pt], 1, &rq_pat[(uint16_t)rq_pt << 4]);
+#endif
+    rq_pt = (uint8_t)((rq_pt + 1u) & (RQ_TILES - 1u));
+    rq_pn--;
+}
+
+/* The row at the front of the queue to the map. */
+static void river_drain_stripe(void) {
+#ifdef __SDCC_sm83
+    rq_dst = (uint8_t *)(PPU_NT1_BASE + ((uint16_t)rq_row_slot[rq_rt] << 5) + RIVER_LEFT_COL);
+    rq_src = rq_row_ids[rq_rt];
+    rq_n = RIVER_TILE_COLS;
+    river_vram_copy();
+#else
+    rj_addr = (uint16_t)(PPU_NT1_BASE + ((uint16_t)rq_row_slot[rq_rt] << 5) + RIVER_LEFT_COL);
+    for (rq_n = 0; rq_n < RIVER_TILE_COLS; rq_n++) {
+        set_vram_byte((uint8_t *)(rj_addr + rq_n), rq_row_ids[rq_rt][rq_n]);
+    }
+#endif
+    if (++rq_rt == RQ_ROWS) {           /* % costs a __moduint: 2.5k units */
+        rq_rt = 0u;
+    }
+    rq_rn--;
+}
+
+/* Upload what is due this pass.  A row counts down from 98 px to 0 at the view top; past that the
+ * value wraps above 127, which only a stalled pass can reach, and it is simply late. */
+static void river_drain(void) {
+    rq_budget = RQ_PASS_TILES;
+    while (rq_rn) {
+#ifdef __SDCC_sm83
+        rq_d = (uint8_t)(playfield_scroll_y + RQ_VIEW_OFF - (uint8_t)(rq_row_slot[rq_rt] << 3));
+#else
+        rq_d = (uint8_t)(((uint16_t)playfield_scroll_y + RQ_VIEW_OFF + RIVER_SCROLL_HEIGHT -
+                          ((uint16_t)rq_row_slot[rq_rt] << 3)) % RIVER_SCROLL_HEIGHT);
+#endif
+        if (rq_d > RQ_DUE && rq_d < 128u) {
+            return;
+        }
+        if (river_gen_budget == 1u && rq_d > RQ_URGENT && rq_d < 128u) {
+            return;                     /* the heavy entity pass: the next one has time */
+        }
+        while (rq_row_n[rq_rt] && rq_budget) {
+            river_drain_tile();
+            rq_row_n[rq_rt]--;
+            rq_budget--;
+        }
+        if (rq_row_n[rq_rt] || rq_budget < RQ_STRIPE_COST) {
+            return;
+        }
+        rq_budget -= RQ_STRIPE_COST;
+        river_drain_stripe();
+    }
+}
+#endif
+
 /* Upload column rj_c's pattern to cache slot rj_id; 0 when the buffer is full. */
 static uint8_t river_emit_pattern(void) {
+#ifdef PLATFORM_DMG
+    if (rq_pn >= RQ_TILES) {
+        return 0u;
+    }
+    memcpy(&rq_pat[(uint16_t)rq_ph << 4], &river_tile_pat[(uint16_t)rj_c * 16u], 16u);
+    rq_id[rq_ph] = rj_id;
+    rq_ph = (uint8_t)((rq_ph + 1u) & (RQ_TILES - 1u));
+    rq_pn++;
+    rq_new++;
+    return 1u;
+#else
     if (!river_live) {
         set_bkg_data(rj_id, 1, &river_tile_pat[(uint16_t)rj_c * 16u]);
         return 1u;
@@ -2328,6 +2503,7 @@ static uint8_t river_emit_pattern(void) {
         vp_src = (uint8_t)((rj_c - 16u) << 4);
     }
     return river_put();
+#endif
 }
 
 /* Tile of the land margins this row needs, or 0xFF when they are already
@@ -2440,6 +2616,20 @@ static uint8_t river_emit_stripe(void) {
     if (river_live && river_road_stage != 3u && !river_emit_extra()) {
         return 0u;
     }
+#ifdef PLATFORM_DMG
+    if (rq_rn >= RQ_ROWS) {
+        return 0u;
+    }
+    rq_row_slot[rq_rh] = river_pending_slot;
+    rq_row_n[rq_rh] = rq_new;
+    rq_new = 0u;
+    memcpy(rq_row_ids[rq_rh], river_row_ids, RIVER_TILE_COLS);
+    if (++rq_rh == RQ_ROWS) {
+        rq_rh = 0u;
+    }
+    rq_rn++;
+    return 1u;
+#else
     rj_addr = (uint16_t)(PPU_NT1_BASE + ((uint16_t)river_pending_slot << 5));
     rj_addr += RIVER_LEFT_COL;
     if (!river_live) {
@@ -2484,6 +2674,7 @@ static uint8_t river_emit_stripe(void) {
     vp_kind = 2u;
     vp_src = 0u;
     return river_put();
+#endif
 }
 
 /* Set rj_id to the cache id of the first earlier, non-solid column whose 16
@@ -3126,6 +3317,9 @@ static void river_start(uint8_t restart, uint8_t bridges) {
 
     rs_isl = 0xFFu;                     /* no rendered row to repeat yet */
     rg_same = 0u;
+#ifdef PLATFORM_DMG
+    river_queue_reset();
+#endif
     river_init_tiles();
 #ifdef RIVER_FAST
     memset(af_id, 0, sizeof(af_id));    /* the atlas is rebuilt on demand */
@@ -3204,7 +3398,7 @@ static void river_start(uint8_t restart, uint8_t bridges) {
     for (i = 0; i < 64u; i++) {
         set_vram_byte((uint8_t *)(PPU_NT1_ATTR + i), 0xAAu);
     }
-#else
+#elif !defined(PLATFORM_DMG)
     /* Clear the BG attribute map (VRAM bank 1): palette 0, tile bank 0. */
     VBK_REG = 1;
     fill_bkg_rect(0, 0, 32, 32, 0);
@@ -3402,6 +3596,9 @@ void river_update(void) {
 #endif
         river_gen_budget = 2u;
     }
+#ifdef PLATFORM_DMG
+    river_drain();
+#endif
     river_job_left = RIVER_JOB_COLS;
     if (river_job && river_gen_budget != 1u) {
         river_run_job();

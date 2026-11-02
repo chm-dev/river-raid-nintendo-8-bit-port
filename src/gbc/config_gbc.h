@@ -48,4 +48,25 @@
 #define GBC_RGB_ALT             RGB(3, 24, 3)
 #define GBC_RGB_ROAD            RGB(14, 14, 14)
 
+#ifdef PLATFORM_DMG
+/* One VRAM bank, 384 tiles (PLAN_DMG.md).  With LCDC bit 4 clear, BG and window ids 0..127 are
+ * $9000 and 128..255 are $8800; sprite ids 0..127 are $8000 and 128..255 are $8800.
+ *
+ *   BG:     0..2 land, water, black; 3..228 river cache; 229..254 HUD; 255 is a sprite's
+ *   Sprite: 0..127, then 255, allocated at boot (dmg_sprite_data in gbc/main.c)
+ *
+ * The logic keeps its sprite ids; oam_camera translates them through dmg_tile_map. */
+#define DMG_HUD_TILE_BASE       229u
+#define DMG_SPRITE_SPILL        255u
+#define DMG_TILE_MAP_ADDR       0xD100u /* page aligned: gbc/main.c, $D000 is the OAM page */
+#define DMG_RQ_PAT_ADDR         0xD200u /* river.c delay queue, RQ_TILES * 16 bytes */
+
+/* Colour index -> shade (0 white .. 3 black).  River: 0 outline, 1 land / road, 2 hills / road
+ * line, 3 water.  The HUD shares BGP: ink is 3 on 0.  Sprite colour 0 is transparent. */
+#define DMG_BGP                 DMG_PALETTE(DMG_BLACK, DMG_LITE_GRAY, DMG_DARK_GRAY, DMG_WHITE)
+#define DMG_BGP_FLASH           DMG_PALETTE(DMG_BLACK, DMG_LITE_GRAY, DMG_DARK_GRAY, DMG_DARK_GRAY)
+#define DMG_OBP0                DMG_PALETTE(DMG_WHITE, DMG_BLACK, DMG_DARK_GRAY, DMG_DARK_GRAY)    /* white would vanish on the water (fuel's U and L) */
+#define DMG_OBP1                DMG_PALETTE(DMG_WHITE, DMG_BLACK, DMG_LITE_GRAY, DMG_DARK_GRAY)
+#endif
+
 #endif /* CONFIG_GBC_H */

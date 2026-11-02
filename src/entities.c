@@ -136,7 +136,12 @@ static uint8_t ent_random(void) {
 }
 
 /* The land palettes' water entry (all three: dark land, bright land, road). */
-#ifdef __SDCC_sm83
+#if defined(__SDCC_sm83) && defined(PLATFORM_DMG)
+/* One BGP: the whole river's water changes shade, as it does on the Atari. */
+static void ent_water_color(uint8_t flash) {
+    BGP_REG = flash ? DMG_BGP_FLASH : DMG_BGP;
+}
+#elif defined(__SDCC_sm83)
 /* GBC: the river uses BG palette 0 only (gbc/main.c bkg_palette); water is
  * colour 3.  The NES palette macro above is a no-op here, so write the whole
  * palette.  c is 0 for normal water, nonzero for the flash colour. */

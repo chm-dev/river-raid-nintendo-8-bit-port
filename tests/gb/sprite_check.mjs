@@ -22,6 +22,8 @@ const hex = v => v.toString(16).toUpperCase().padStart(4, '0');
 const bytes = async (a, size) => JSON.parse(txt(await c.call('read_memory', { area: 6, offset: hex(a - 0xC000), size })))
     .data.trim().split(/\s+/).map(h => parseInt(h, 16));
 const JET = 7, FUEL = 15, VIEW_TOP = 112, VIEW_BOTTOM = 232, TILE_BASE = 88;
+/* DMG ROM: logic tile ids go through dmg_tile_map, so check the hardware id against the mapped set. */
+const dmgMap = /DEF _dmg_tile_map /.test(noi);
 
 await c.init();
 await c.call('debug_continue');
@@ -33,6 +35,13 @@ await sleep(4000);
 await c.call('write_memory', { area: 6, offset: hex(sym('_player_invuln') - 0xC000), bytes: '01' });
 await c.call('controller_button', { action: 'press', button: 'up', player: 1 });
 await sleep(1500);
+
+let entityTile = t => t >= TILE_BASE;
+if (dmgMap) {
+    const map = await bytes(sym('_dmg_tile_map'), 256);
+    const set = new Set(map.slice(TILE_BASE, TILE_BASE + 141));
+    entityTile = t => set.has(t);
+}
 
 let checked = 0, missed = 0;
 for (let n = 0; n < samples; n++) {
@@ -51,7 +60,7 @@ for (let n = 0; n < samples; n++) {
             for (let s = 2; s < 40; s++) {
                 const y = p[s * 4], x = p[s * 4 + 1], tile = p[s * 4 + 2];
                 const offs = (x - ((ex[i] + dx) & 255)) & 255;
-                if (tile >= TILE_BASE && offs % 8 === 0 && offs <= 24 && Math.abs(y - (ey[i] - 96)) <= 32) return true;
+                if (entityTile(tile) && offs % 8 === 0 && offs <= 24 && Math.abs(y - (ey[i] - 96)) <= 32) return true;
             }
             return false;
         });

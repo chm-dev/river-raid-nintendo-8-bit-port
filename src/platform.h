@@ -9,4 +9,11 @@
 #include <nes/nes.h>
 #endif
 
+#if defined(__SDCC_sm83) && defined(PLATFORM_DMG)
+/* Sprite tiles go through the boot-time allocator in gbc/main.c: the ids in the logic stay. */
+void dmg_sprite_data(uint8_t first, uint8_t n, const uint8_t *src);
+#undef set_sprite_data
+#define set_sprite_data dmg_sprite_data
+#endif
+
 #endif

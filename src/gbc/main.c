@@ -18,6 +18,9 @@
  * Sprites: the logic files are compiled with shadow_OAM renamed to
  * gbc_logic_oam (see build_gbc.ps1), so they keep writing NES-coordinate
  * sprites.  oam_camera() translates them into the real shadow_OAM each frame.
+ *
+ * PLATFORM_DMG (build_gbc.ps1 -Dmg): the same game on one VRAM bank and four shades.  See
+ * gbc/config_gbc.h for the tile layout.
  */
 #include <gb/gb.h>
 #include <gb/cgb.h>
@@ -81,6 +84,47 @@ static uint8_t cam_spawn_set;       /* camera_x holds this river's spawn view */
 #define GBC_PLAYER_STATE_PAUSE 6u   /* = PLAYER_STATE_PAUSE in player.c */
 #define GBC_PLAYER_WIDTH      8u    /* = PLAYER_WIDTH in player.c */
 
+#ifdef PLATFORM_DMG
+/* Logic sprite id -> hardware tile.  Page aligned for oam_camera_core. */
+uint8_t __at(DMG_TILE_MAP_ADDR) dmg_tile_map[256];
+uint8_t dmg_spr_used;               /* hardware sprite tiles allocated; read by tests */
+
+/* Upload sprite tiles for the logic ids first..first + n - 1, sharing any tile whose pixels are
+ * already there.  Boot only: the display is off, so VRAM can be read and written freely.  Past
+ * the budget the tile shows as tile 0; tests/gb/dmg_check.mjs checks dmg_spr_used. */
+void dmg_sprite_data(uint8_t first, uint8_t n, const uint8_t *src) {
+    static uint8_t sums[129];       /* a memcmp per candidate took 3 s at this clock */
+    uint8_t hw, sum, k;
+
+    for (; n != 0u; n--, first++, src += 16u) {
+        sum = 0u;
+        for (k = 0u; k < 16u; k++) {
+            sum = (uint8_t)(sum + src[k]);
+        }
+        for (hw = 0u; hw < dmg_spr_used; hw++) {
+            if (hw <= 128u && sums[hw] == sum &&
+                !memcmp((const uint8_t *)(0x8000u + ((uint16_t)((hw < 128u) ? hw : DMG_SPRITE_SPILL) << 4)), src, 16u)) {
+                break;
+            }
+        }
+        if (hw == dmg_spr_used) {
+            dmg_spr_used++;
+            if (hw > 128u) {
+                hw = 0u;            /* over budget */
+            } else {
+                sums[hw] = sum;
+                memcpy((uint8_t *)(0x8000u + ((uint16_t)((hw < 128u) ? hw : DMG_SPRITE_SPILL) << 4)), src, 16u);
+            }
+        }
+        dmg_tile_map[first] = (hw < 128u) ? hw : DMG_SPRITE_SPILL;
+    }
+}
+#define OAM_HW_TILE(t)      (dmg_tile_map[t])
+#define OAM_HW_PROP(p)      ((uint8_t)(((p) & 3u) ? ((p) | S_PALETTE) : (p)))
+#else
+#define OAM_HW_TILE(t)      (t)
+#define OAM_HW_PROP(p)      ((uint8_t)((p) | S_BANK))
+
 /* Index meaning is set by the river tiles: 0 outline (black), 1 land,
  * 3 water; 2 is spare (road line).  One palette for now; per-row colour is
  * milestone 3. */
@@ -100,11 +144,13 @@ static const palette_color_t spr_palette[4][4] = {
     { RGB(0, 0, 0), RGB(0, 0, 0), RGB(31, 28, 6), RGB(4, 6, 18) },
     { RGB(0, 0, 0), RGB(0, 0, 0), RGB(22, 4, 4), RGB(6, 28, 28) }
 };
+#endif
 
 void hud_set_playfield_scroll(uint8_t y) {
     playfield_scroll_y = y;
 }
 
+#ifndef PLATFORM_DMG
 /* An original Game Boy ignores the header's CGB-only flag, so say why nothing
  * will run instead of showing garbage. */
 static void gbc_required(void) {
@@ -120,6 +166,7 @@ static void gbc_required(void) {
         wait_vbl_done();
     }
 }
+#endif
 
 /* Camera X for a jet at logic X `jet_x`, clamped to the ring. */
 static uint8_t camera_for(int16_t jet_x) {
@@ -231,8 +278,8 @@ static void oam_camera_slow(void) {
         if (player_state == GBC_PLAYER_STATE_PAUSE && (i >= 56u || (i >= 2u && i <= 4u))) {
             d->y = y;
             d->x = gbc_logic_oam[i].x;
-            d->tile = gbc_logic_oam[i].tile;
-            d->prop = (uint8_t)(gbc_logic_oam[i].prop | S_BANK);
+            d->tile = OAM_HW_TILE(gbc_logic_oam[i].tile);
+            d->prop = OAM_HW_PROP(gbc_logic_oam[i].prop);
             d++;
             n++;
             continue;
@@ -245,8 +292,8 @@ static void oam_camera_slow(void) {
         }
         d->y = (uint8_t)(y + 8u);
         d->x = x;
-        d->tile = gbc_logic_oam[i].tile;
-        d->prop = (uint8_t)(gbc_logic_oam[i].prop | S_BANK);
+        d->tile = OAM_HW_TILE(gbc_logic_oam[i].tile);
+        d->prop = OAM_HW_PROP(gbc_logic_oam[i].prop);
         d++;
         n++;
     }
@@ -269,6 +316,9 @@ static const uint8_t *oam_cam_s;
 static uint8_t *oam_cam_d;
 static uint8_t oam_cam_n;
 typedef char oam_asm_consts[(GBC_VIEW_TOP_SCANLINE == 112u && GBC_VIEW_LINES == 128u && S_BANK == 8u) ? 1 : -1];
+#ifdef PLATFORM_DMG
+typedef char oam_asm_dmg_consts[(DMG_TILE_MAP_ADDR == 0xD100u && S_PALETTE == 0x10u) ? 1 : -1];
+#endif
 
 static void oam_camera_core(void) {
     __asm
@@ -309,10 +359,27 @@ static void oam_camera_core(void) {
         inc     e
         inc     hl
         ld      a, (hl+)            ; tile
+#ifdef PLATFORM_DMG
+        push    hl                  ; through dmg_tile_map, page aligned
+        ld      h, #0xD1            ; DMG_TILE_MAP_ADDR
+        ld      l, a
+        ld      a, (hl)
+        pop     hl
+#endif
         ld      (de), a
         inc     e
         ld      a, (hl+)            ; prop
+#ifdef PLATFORM_DMG
+        bit     0, a                ; any colour palette but 0 is OBP1
+        jr      NZ, 5$
+        bit     1, a
+        jr      Z, 6$
+    5$:
+        set     4, a                ; S_PALETTE
+    6$:
+#else
         set     3, a                ; S_BANK
+#endif
         ld      (de), a
         inc     e
         ld      a, e
@@ -395,19 +462,32 @@ static void hud_show_sprites_isr(void) {
 void main(void) {
     uint8_t i;
 
+#ifndef PLATFORM_DMG
     if (_cpu != CGB_TYPE) {
         gbc_required();
     }
 #ifndef DMG_PROXY                       /* build_gbc.ps1 -DmgProxy: stay at the DMG clock (single speed) */
     cpu_fast();
 #endif
+#endif
 
     DISPLAY_OFF;
+#ifdef PLATFORM_DMG
+    LCDC_REG &= (uint8_t)~LCDCF_BG8000; /* BG and window: $9000 and $8800 */
+    BGP_REG = DMG_BGP;
+    OBP0_REG = DMG_OBP0;
+    OBP1_REG = DMG_OBP1;
+#else
     set_bkg_palette(0, GBC_RIVER_PALS, &bkg_palette[0][0]);
+#endif
     for (i = 0; i < LOGIC_OAM_SLOTS; i++) {
         gbc_logic_oam[i].y = 240u;
     }
 
+#ifdef PLATFORM_DMG
+    player_init_graphics();
+    entities_init_graphics();
+#else
     /* Sprite tiles go to VRAM bank 1: the ids the sprite code uses overlap the
      * river cache in bank 0. */
     VBK_REG = 1;
@@ -417,6 +497,7 @@ void main(void) {
     /* The two modules above feed NES colour numbers to the palette call (a
      * no-op in entities.c, garbage in player.c); set the real ones last. */
     set_sprite_palette(0, 4, &spr_palette[0][0]);
+#endif
     hud_gbc_init();
     sound_init();
 

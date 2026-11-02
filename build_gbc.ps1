@@ -5,7 +5,7 @@
 #
 # Banked modules: entities, entity_gfx get -Wf-bo1; player gets -Wf-bo2.  The link is MBC5 with 4
 # banks.  After the link the script fails the build unless:
-#   - the header says CGB-only ($0143 = $C0), MBC5+RAM+BATTERY ($0147 = $1B), 8 KB SRAM ($0149 = 2), the right
+#   - the header says CGB-only ($0143 = $C0; -Dmg: no CGB flag), MBC5+RAM+BATTERY ($0147 = $1B), 8 KB SRAM ($0149 = 2), the right
 #     ROM size code ($0148) and a valid header checksum ($014D);
 #   - the file is exactly Banks * 16 KB;
 #   - every ROM area in the .map sits inside its bank window (the linker does
@@ -24,6 +24,7 @@ param(
     [switch]$PassLog,           # per-pass log for tests/gb/pass_log.mjs (costs ~2k units per pass)
     [switch]$River2600,         # 2600 river: -DRIVER_BLOCKY -DRIVER_NOFEAT -DRIVER_FAST (docs/MOD_2600_SPEC.md)
     [switch]$DmgProxy,          # no cpu_fast(): the DMG CPU proxy (proposal row 8)
+    [switch]$Dmg,               # a real DMG ROM: no CGB flag, PLATFORM_DMG (PLAN_DMG.md)
     [string[]]$Define = @()     # extra -D flags, e.g. RIVER_GRID=4
 )
 
@@ -54,6 +55,7 @@ foreach ($src in $Sources) {
     if ($PassLog) { $a += '-DPROF_PASSLOG' }
     if ($River2600) { $a += '-DRIVER_BLOCKY', '-DRIVER_NOFEAT', '-DRIVER_FAST' }
     if ($DmgProxy) { $a += '-DDMG_PROXY' }
+    if ($Dmg) { $a += '-DPLATFORM_DMG' }
     foreach ($d in $Define) { $a += "-D$d" }
     # Game logic writes sprites in NES coordinates into gbc_logic_oam; only
     # gbc/main.c sees the real shadow_OAM and translates (camera, +16/+8).
@@ -65,8 +67,8 @@ foreach ($src in $Sources) {
 }
 
 # ---- link ----
-$l = @('-msm83:gb', '-Wl-j', '-Wl-m', '-Wl-yt0x1B', '-Wl-ya1', "-Wl-yo$Banks", '-Wm-yC',
-       '-Wm-ynRIVERRAID', '-o', $rom) + $objs
+$l = @('-msm83:gb', '-Wl-j', '-Wl-m', '-Wl-yt0x1B', '-Wl-ya1', "-Wl-yo$Banks") +
+     $(if ($Dmg) { @() } else { @('-Wm-yC') }) + @('-Wm-ynRIVERRAID', '-o', $rom) + $objs
 & $lcc @l
 if ($LASTEXITCODE -ne 0) { Write-Host 'link failed' -ForegroundColor Red; exit 1 }
 
@@ -77,7 +79,10 @@ $bytes = [IO.File]::ReadAllBytes($rom)
 if ($bytes.Length -eq $Banks * 16384) { Pass "size $($bytes.Length) bytes = $Banks banks" }
 else { Fail "size $($bytes.Length) bytes, expected $($Banks * 16384)" }
 
-if ($bytes[0x143] -eq 0xC0) { Pass 'header $0143 = $C0 (CGB only)' }
+if ($Dmg) {
+    if (($bytes[0x143] -band 0x80) -eq 0) { Pass ('header $0143 = ${0:X2} (no CGB flag)' -f $bytes[0x143]) }
+    else { Fail ('header $0143 = ${0:X2}, expected no CGB flag' -f $bytes[0x143]) }
+} elseif ($bytes[0x143] -eq 0xC0) { Pass 'header $0143 = $C0 (CGB only)' }
 else { Fail ('header $0143 = ${0:X2}, expected $C0 (CGB only)' -f $bytes[0x143]) }
 
 if ($bytes[0x147] -eq 0x1B) { Pass 'header $0147 = $1B (MBC5+RAM+BATTERY)' }

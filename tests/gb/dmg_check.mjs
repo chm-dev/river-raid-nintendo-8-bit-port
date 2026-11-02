@@ -1,0 +1,119 @@
+/*
+ * dmg_check.mjs - is the -Dmg ROM really running as a DMG, and does its VRAM hold what the game
+ * means to show?  The references are ones no ROM code produced:
+ *   - sprite tiles: every logic id, through dmg_tile_map, against ent_gfx_chr in src/entity_gfx.c;
+ *   - the river: the map cells on screen, through the tile patterns, against the edges collision
+ *     uses (river_left_x / river_right_x for that ring slot, written by the generator).  A cell
+ *     showing a stale or clobbered tile has its outline in the wrong place.
+ *
+ *   gearboy/Gearboy.exe --headless --mcp-http --mcp-http-port 7777 roms/X.gb roms/X.noi
+ *   $env:GB_NOI='roms/X.noi'; node tests/gb/dmg_check.mjs [samples]
+ *
+ * Plays with an invulnerable jet at fast speed.  Exit code 1 on any failure.
+ */
+import { readFileSync } from 'fs';
+import * as c from './gearboy_client.mjs';
+
+const samples = Number(process.argv[2] || 30);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const txt = r => r.map(x => x.text || '').join('');
+const noi = readFileSync(process.env.GB_NOI || 'roms/river_raid_dmg.noi', 'utf8');
+const sym = n => parseInt(new RegExp(`DEF ${n} 0x([0-9A-Fa-f]+)`).exec(noi)[1], 16);
+const hex = v => v.toString(16).toUpperCase().padStart(4, '0');
+const read = async (area, offset, size) => JSON.parse(txt(await c.call('read_memory', { area, offset: hex(offset), size })))
+    .data.trim().split(/\s+/).map(h => parseInt(h, 16));
+const wram = (a, size) => read(6, a - 0xC000, size);
+
+await c.init();
+const areas = txt(await c.call('list_memory_areas', {}));
+const vramArea = JSON.parse(areas).areas.find(a => /vram/i.test(a.name)).id;
+const vram = (a, size) => read(vramArea, a - 0x8000, size);
+const bgTile = async id => vram((id < 128 ? 0x9000 : 0x8000) + id * 16, 16);
+
+let fail = 0;
+const info = txt(await c.call('get_media_info', {}));
+console.log(info.split('\n').filter(l => /cgb|gbc|dmg|color|model|type/i.test(l)).join(' | ').slice(0, 300));
+
+await c.call('debug_continue');
+/* Boot done: the main loop counts frames.  How long it takes is a player-visible blank screen. */
+const bootT0 = Date.now();
+for (;;) {
+    await sleep(50);
+    const f = await wram(sym('_frame_counter'), 2);
+    if (f[0] || f[1]) break;
+    if (Date.now() - bootT0 > 10000) { console.log('no frame in 10 s'); process.exit(1); }
+}
+console.log(`boot ${Date.now() - bootT0} ms`);
+await sleep(2000);
+
+/* Sprite tiles */
+const chrSrc = readFileSync('src/entity_gfx.c', 'utf8');
+const chr = /ent_gfx_chr\[\d+\] = \{([^}]*)\}/.exec(chrSrc)[1].match(/0x[0-9A-Fa-f]{2}/g).map(h => parseInt(h, 16));
+await c.call('debug_pause');
+const map = await wram(sym('_dmg_tile_map'), 256);
+const used = (await wram(sym('_dmg_spr_used'), 1))[0];
+const spr = await vram(0x8000, 0x1000);
+let wrong = 0;
+for (let i = 0; i * 16 < chr.length; i++) {
+    const hw = map[88 + i];
+    if (hw >= 128 && hw !== 255) wrong++;
+    for (let b = 0; b < 16; b++) {
+        if (spr[hw * 16 + b] !== chr[i * 16 + b]) { wrong++; break; }
+    }
+}
+console.log(`sprite tiles allocated ${used} (budget 129), entity tiles not matching ${wrong} of ${chr.length / 16}`);
+if (used > 129 || wrong) fail++;
+await c.call('debug_continue');
+
+/* Play */
+await c.call('controller_button', { action: 'press', button: 'start', player: 1 });
+await sleep(300);
+await c.call('controller_button', { action: 'release', button: 'start', player: 1 });
+await sleep(4000);
+await c.call('write_memory', { area: 6, offset: hex(sym('_player_invuln') - 0xC000), bytes: '01' });
+await c.call('controller_button', { action: 'press', button: 'up', player: 1 });
+await sleep(1500);
+
+/* River: for each map row well inside the view, in each sample */
+let rows = 0, bad = 0;
+const tileCache = new Map();
+for (let n = 0; n < samples; n++) {
+    await sleep(500);
+    await c.call('debug_pause');
+    tileCache.clear();
+    const scroll = (await wram(sym('_playfield_scroll_y'), 1))[0];
+    const scy = (scroll + 82) & 255;
+    const left = await wram(sym('_river_left_x'), 32), right = await wram(sym('_river_right_x'), 32);
+    const isl = await wram(sym('_river_flags'), 32);
+    const mapBytes = await vram(0x9800, 32 * 32);
+    /* Whole rows only, away from the top: the bottom line of the view shows row (scy + 127) >> 3 */
+    for (let k = 1; k < 15; k++) {
+        const slot = ((scy >> 3) + k) & 31;
+        if (right[slot] === 0 || isl[slot]) continue;     /* black start rows; islands and features have more edges */
+        const line = [];
+        for (let col = 0; col < 24; col++) {
+            const id = mapBytes[slot * 32 + col];
+            if (!tileCache.has(id)) tileCache.set(id, await bgTile(id));
+            const t = tileCache.get(id);
+            /* The 4th of the tile's 8 lines is the raw row river_left_x samples (block index 3 -> line 4). */
+            const lo = t[4 * 2], hi = t[4 * 2 + 1];
+            for (let b = 7; b >= 0; b--) line.push(((lo >> b) & 1) | (((hi >> b) & 1) << 1));
+        }
+        /* Water is colour 3, so the widest run of colour 3 has to span the row's channel. */
+        let best = 0, bestAt = -1, run = 0;
+        for (let x = 0; x <= line.length; x++) {
+            if (x < line.length && line[x] === 3) run++;
+            else { if (run > best) { best = run; bestAt = x - run; } run = 0; }
+        }
+        rows++;
+        const mid = (left[slot] + right[slot]) >> 1;
+        if (!(bestAt <= mid && mid < bestAt + best)) {
+            bad++;
+            if (bad < 6) console.log(`sample ${n} slot ${slot}: water ${bestAt}..${bestAt + best} but edges ${left[slot]}..${right[slot]}`);
+        }
+    }
+    await c.call('debug_continue');
+}
+console.log(`river rows checked ${rows}, wrong ${bad}`);
+if (!rows || bad) fail++;
+if (fail) process.exit(1);
