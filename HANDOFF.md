@@ -2,19 +2,19 @@
 
 Short, current, rewritten every session. Rules are in `AGENTS.md`; **the plan is `PLAN_DMG.md`**; history is `PROGRESS.md` (grep it, do not read whole).
 
-**Last updated:** 2026-11-02 · **Branch:** `dmg-exact` (from `river-2600`) · **Phase:** the exact river runs as a DMG ROM in Gearboy; waiting for the user's playtest.
+**Last updated:** 2026-11-02 · **Branch:** `dmg-exact` (from `river-2600`) · **Phase:** the exact river on DMG passed the user's playtest ("absolutely flawless"); two colour requests done, waiting for the user's look.
 
 ## Where we are
 
 - **GBC port finished on `main`** (architecture: `archive/gbc/HANDOFF.md`). `main` does **not** have the Stage 1b speedups or the DMG work; they are not pushed by us and not merged. Merging is the user's call.
-- **`roms/river_raid_dmg.gb` (`.\build_gbc.ps1 -Dmg -Name river_raid_dmg`) is the exact river on one VRAM bank, with no art cut.** Gates for tiles and speed pass; the playtest is the last one.
+- **`roms/river_raid_dmg.gb` (`.\build_gbc.ps1 -Dmg -Name river_raid_dmg`) is the exact river on one VRAM bank, with no art cut.** All gates pass, including the user's playtest (2026-11-02, every checklist item).
 - **The 2600 river is parked, not dropped:** flags `RIVER_2600`, `RIVER_BLOCKY`, `RIVER_NOFEAT`, `RIVER_FAST`, `build_gbc.ps1 -River2600`, tasks and findings in `PLAN_2600.md`.
 
 **Fast flight, 10 s, start index 0 / 2 / 3** (playing an invulnerable jet holding Up):
 
 | ROM | Passes/frame | Clamps |
 |---|---|---|
-| **DMG, exact river** (`river_raid_dmg`) | **0.99 / 0.98 / 0.96** | 1 / 2 / 1-2 |
+| **DMG, exact river** (`river_raid_dmg`) | **0.99-1.00 / 0.98 / 0.96** | 0-1 / 2 / 1-2 |
 | Exact river, DMG proxy (`river_raid_slow`), the user accepted it | 1.00 / 0.97 / 0.95 | 0 / 2 / 2 |
 | Exact river, double speed (`river_raid`) | 1.00 / 1.00 / 1.00 | 0 / 0 / 0 |
 | 2600, DMG proxy | 0.99 / 0.99 / 0.99 | 0 / 2 / 1 |
@@ -24,16 +24,16 @@ Short, current, rewritten every session. Rules are in `AGENTS.md`; **the plan is
 - **The surprise:** `SCY = scroll + 82`, since logic keeps NES coordinates. Rows are written 98 px above the view and hold a cache slot for 28 tile rows: 259-266 slots, with 178 left.
 - **Delay queue** (`river.c`, `PLATFORM_DMG`): rows wait in WRAM and upload 32 px above the view: 206 slots needed, 226 allocated. Generator, spawner and collision do not change.
 - **Sprites:** identical tiles shared at boot, 167 → 124. The logic keeps its ids; `oam_camera` translates through `dmg_tile_map` (`$D100`). **HUD:** 36 → 26.
-- **Grey:** one `BGP`, `OBP0`/`OBP1` (`config_gbc.h`). Low fuel: E and F go out with the note.
+- **Grey:** one `BGP`, `OBP0`/`OBP1` (`config_gbc.h`), plus per-object colour indexes at upload (`entities_init_graphics`: balloon, enemy jet). Low fuel: E and F go out with the note.
 
 ## Next steps
 
-1. **The user plays `roms/river_raid_dmg.gb`.** Checklist below. Then mark it in `BUGS&FEATS.md`.
-2. Depending on that: shades on real hardware, boot time (~1.5 s blank), remaining peaks (`river_find_dup`, `river_copy_template`).
+1. **The user looks at the colours** in `roms/river_raid_dmg.gb`: FUEL dark and light grey, balloon light grey with a dark stripe and basket, enemy jets still dark and easy to see. Then mark it in `BUGS&FEATS.md`.
+2. The user's calls: merge `dmg-exact`, and the GBC bottom-row clobber. Optional: boot time (~1.5-1.7 s blank), remaining peaks (`river_find_dup`, `river_copy_template`).
 
 Parked: 2600 river work (Stage 1b steps 5-8, Stage 2), **smooth blocky edges** (`BUGS&FEATS.md`). Open for the user: the rare bottom-row clobber on the GBC exact ROM; the NES is unmeasured (`BUGS&FEATS.md`).
 
-**Playtest checklist:** land and water read apart at a glance · every enemy, FUEL and the bridge are visible on water and on land · trees, houses and roads look right, no wrong tiles anywhere, including the bottom rows and just below the top of the view · fast flight feels like `river_raid_slow.gb` on start levels 1, 20 and 50 · low fuel: E and F blink · bridge shot: water flashes, and by the code the HUD text flickers with it (one `BGP`): does that bother you? · pause menu readable · crash and restart · high score after power-off · a long game past level 13 (fast helicopters).
+**Playtest checklist (passed 2026-11-02; repeat after big changes):** land and water read apart at a glance · every enemy, FUEL and the bridge are visible on water and on land · trees, houses and roads look right, no wrong tiles anywhere, including the bottom rows and just below the top of the view · fast flight feels like `river_raid_slow.gb` on start levels 1, 20 and 50 · low fuel: E and F blink · bridge shot: water flashes, and by the code the HUD text flickers with it (one `BGP`): does that bother you? · pause menu readable · crash and restart · high score after power-off · a long game past level 13 (fast helicopters).
 
 **Per-step check:** `host_river.ps1` (exact), `host_river.ps1 -Blocky`, `host_river_fast.ps1 -Rows 20000 -JobCols 10`, `host_river_queue.ps1`, `.\build.ps1` (NES), then `.\build_gbc.ps1`, `-River2600`, `-Dmg`. **After shared code, compare ROM hashes:** GBC, 2600 and NES ROMs must be byte-identical unless the change is meant for them. Bank 0 end in the `.map`. Profile: `.\build_gbc.ps1 -ProfExport -Dmg -Name rr_dmg_prof`, `$env:GB_NOI='roms/rr_dmg_prof.noi'; node tests/gb/profile_play.mjs fast|cruise 40` (`$env:GB_START_LEVEL=n` for another start; Gearboy launch line in `AGENTS.md`). **After touching assembly or its C twin:** `-OamCheck` and `-RiverCheck` ROMs, run with `profile_play.mjs`: all error counts must be 0. **Before a handover:** `tests/gb/dmg_check.mjs` and `tests/gb/sprite_check.mjs` on the player ROM, each on a freshly started emulator, and look at a screenshot.
 
@@ -45,7 +45,7 @@ Parked: 2600 river work (Stage 1b steps 5-8, Stage 2), **smooth blocky edges** (
 - **Collision and drawing share one edge description** (`rg_row_left/right`).
 - **Performance before authenticity** (user, 2026-11-02). Features may be dropped, but cutting art is the user's call.
 - **The slow exact ROM's feel is acceptable** (user's playtest, 2026-11-02): that is the reference for DMG.
-- **Delay queue and shared tiles for the DMG** (user, 2026-11-02).
+- **Delay queue and shared tiles for the DMG** (user, 2026-11-02). **The DMG ROM's feel is accepted** (user's playtest, 2026-11-02).
 - **Fast flight stays at 1.5 px/frame**, **HUD art from `charset.bin`**, **sound values from live Atari captures**, **the user runs the playtests**.
 
 ## Where to look
@@ -66,7 +66,7 @@ Parked: 2600 river work (Stage 1b steps 5-8, Stage 2), **smooth blocky edges** (
 
 ## Known gaps
 
-- **Nothing has run on a real DMG.** Gearboy's DMG mode is the only evidence. On hardware watch the 2-writes-per-STAT-test timing in `river_vram_copy_asm` and how the shades read. The GBC ROM's "GBC REQUIRED" screen has never run on a plain Game Boy.
+- **My checks only ran in Gearboy's DMG mode;** what the user's playtest ran on was not recorded. On hardware watch the 2-writes-per-STAT-test timing in `river_vram_copy_asm` and how the shades read. The GBC ROM's "GBC REQUIRED" screen has never run on a plain Game Boy.
 - All timings come from 10 s windows with an invulnerable jet holding Up. Not measured: long runs, heavy shooting, level 13+ fast helicopters at speed. Tile needs are measured over 60,000 rows without player deaths or shots.
 - `dmg_check.mjs`'s river test is coarse (plain rows, middle of the channel); the exact picture is proved on the host (`host_river_queue.ps1`). It and `sprite_check.mjs` run on the first start level only.
 - Not looked at in a screenshot: the bridge flash, level 13+ fast helicopters and their missile.

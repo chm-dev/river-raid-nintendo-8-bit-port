@@ -53,12 +53,24 @@ await c.call('debug_pause');
 const map = await wram(sym('_dmg_tile_map'), 256);
 const used = (await wram(sym('_dmg_spr_used'), 1))[0];
 const spr = await vram(0x8000, 0x1000);
+/* Colour indexes the DMG wants per object: balloon 1 -> 2, 2 -> 3; enemy jet and its explosion 2 -> 3. */
+const table = n => new RegExp(`${n}\\[18\\] = \\{([^}]*)\\}`).exec(chrSrc)[1].match(/0x[0-9A-Fa-f]{2}/g).map(h => parseInt(h, 16));
+const first = table('ent_gfx_first'), count = table('ent_gfx_count'), expFirst = table('ent_exp_first');
+const BALLOON = 12, ENEMY_JET = 7;
 let wrong = 0;
 for (let i = 0; i * 16 < chr.length; i++) {
     const hw = map[88 + i];
     if (hw >= 128 && hw !== 255) wrong++;
-    for (let b = 0; b < 16; b++) {
-        if (spr[hw * 16 + b] !== chr[i * 16 + b]) { wrong++; break; }
+    const balloon = i >= first[BALLOON] && i < first[BALLOON] + count[BALLOON];
+    const jet = i === first[ENEMY_JET] || (i >= expFirst[ENEMY_JET] && i < expFirst[ENEMY_JET] + 5);
+    for (let l = 0; l < 8; l++) {
+        for (let x = 0; x < 8; x++) {
+            const px = (lo, hi) => ((lo >> x) & 1) | (((hi >> x) & 1) << 1);
+            let want = px(chr[i * 16 + l * 2], chr[i * 16 + l * 2 + 1]);
+            if (balloon && want) want++;
+            if (jet && want === 2) want = 3;
+            if (px(spr[hw * 16 + l * 2], spr[hw * 16 + l * 2 + 1]) !== want) { wrong++; l = 8; break; }
+        }
     }
 }
 console.log(`sprite tiles allocated ${used} (budget 129), entity tiles not matching ${wrong} of ${chr.length / 16}`);

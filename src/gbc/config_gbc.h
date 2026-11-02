@@ -65,7 +65,7 @@
  * line, 3 water.  The HUD shares BGP: ink is 3 on 0.  Sprite colour 0 is transparent. */
 #define DMG_BGP                 DMG_PALETTE(DMG_BLACK, DMG_LITE_GRAY, DMG_DARK_GRAY, DMG_WHITE)
 #define DMG_BGP_FLASH           DMG_PALETTE(DMG_BLACK, DMG_LITE_GRAY, DMG_DARK_GRAY, DMG_DARK_GRAY)
-#define DMG_OBP0                DMG_PALETTE(DMG_WHITE, DMG_BLACK, DMG_DARK_GRAY, DMG_DARK_GRAY)    /* white would vanish on the water (fuel's U and L) */
+#define DMG_OBP0                DMG_PALETTE(DMG_WHITE, DMG_BLACK, DMG_LITE_GRAY, DMG_DARK_GRAY)
 #define DMG_OBP1                DMG_PALETTE(DMG_WHITE, DMG_BLACK, DMG_LITE_GRAY, DMG_DARK_GRAY)
 #endif
 

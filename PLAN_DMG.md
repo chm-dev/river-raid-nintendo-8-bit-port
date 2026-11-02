@@ -2,7 +2,7 @@
 
 Started 2026-11-02, branch `dmg-exact`. An experiment: `river-2600` stays as the fallback. Update this file as tasks finish; it is the place for numbers.
 
-**Status:** tasks 1-5 done, ROM `roms/river_raid_dmg.gb` waits for the user's playtest. The user chose the delay queue and tile sharing on 2026-11-02, after the task 1 report.
+**Status:** tasks 1-5 done. **The user played `roms/river_raid_dmg.gb` on 2026-11-02: "absolutely flawless", every checklist item passes.** Two colour requests followed (task 4); those wait for the user's look. The user chose the delay queue and tile sharing on 2026-11-02, after the task 1 report.
 
 ## Why this is worth trying
 
@@ -61,7 +61,9 @@ See the budget above.
 
 ### 4. Colour to grey: done
 - `BGP`: outline black, land light grey, hills / road line dark grey, water white. The land-colour flip and road colour are gone; the road keeps its pixels. Bridge flash: water goes dark grey (`DMG_BGP_FLASH`).
-- Sprites: colour palette 0 → `OBP0`, 1..3 → `OBP1`, in `oam_camera`. `OBP0` has no white, or FUEL's U and L vanish on the water.
+- Sprites: colour palette 0 → `OBP0`, 1..3 → `OBP1`, in `oam_camera`. `OBP0`: black, light grey, dark grey, so FUEL is F and E dark, U and L light (user). No white, or U and L vanish on the water.
+- Per object, at upload (`entities_init_graphics`, before tiles are shared), since `OBP0`'s colour 2 went light: enemy jets and their explosion 2 → 3, to stay dark. Balloon on `OBP1` (`ent_gfx_pal`, DMG table in the generator) with 1 → 2 and 2 → 3: light grey body, dark grey stripe and basket (user). Its explosion now draws on `OBP1` too.
+- A light grey object on light grey land has no outline: FUEL's U and L, and the balloon's body. Both stay over water in normal play.
 - HUD: ink is colour 3 on 0, the same index as water, so by the code the bridge flash also flickers the HUD text (not yet seen). If it bothers the user: `BGP` could be reset for the HUD in the LYC handler. Low fuel: E and F go out while the note sounds.
 
 ### 5. Test it: done, the user's playtest is next
@@ -72,8 +74,8 @@ See the budget above.
 
 | `river_raid_dmg`, 10 s, invulnerable jet | Start 0 | Start 2 | Start 3 |
 |---|---|---|---|
-| Fast, passes/frame | 0.99 | 0.98 | 0.96 |
-| Fast, clamps | 1 | 2 | 1-2 |
+| Fast, passes/frame | 0.99-1.00 | 0.98 | 0.96 |
+| Fast, clamps | 0-1 | 2 | 1-2 |
 | Cruise, passes/frame | 1.00 | 1.00 | 1.00 |
 | Proxy ROM the user accepted, fast | 1.00 | 0.97 | 0.95 |
 
@@ -83,14 +85,14 @@ See the budget above.
 |---|---|---|
 | Tiles (Z) | All must fit in 384 with no on-screen clobber, on the host | Pass: 206 needed, 226 allocated |
 | Fast flight (A), proposed, the user to confirm | About 0.95 passes/frame | Pass: 0.96 at worst |
-| Final | The user's playtest | **Open** |
+| Final | The user's playtest | **Pass** (2026-11-02), before the colour requests |
 
 ## Not verified
 
 - Nothing has run on a real DMG; Gearboy's DMG mode is the only evidence. Worth watching on hardware: the 2-writes-per-STAT-test timing in `river_vram_copy_asm`, and how the shades read on the real LCD (white water against light grey land).
 - Cross-row tile sharing (the last column above) would need 165-179, but costs CPU on every column. Not needed.
 - `-Dmg -River2600` builds (bank 0 ends `$394E`) but has never run, and its ring is unmeasured.
-- Boot on the DMG ROM takes ~1.5 s with a blank screen (measured in Gearboy); the tile sharing is part of it.
+- Boot on the DMG ROM takes ~1.5-1.7 s with a blank screen (measured in Gearboy); the tile sharing is part of it.
 
 ## If it does not work
 

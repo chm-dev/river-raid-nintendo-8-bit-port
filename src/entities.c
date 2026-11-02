@@ -233,7 +233,33 @@ void entities_init_graphics(void) BANKED {
         pal[3] = ent_gfx_palette[e_i][2];
         set_sprite_palette((uint8_t)(e_i + 1u), 1, pal);
     }
+#if defined(__SDCC_sm83) && defined(PLATFORM_DMG)
+    /* Two sprite palettes: some objects need other colour indexes than on the GBC.  Their colour
+     * 2 is light grey now, for FUEL (user, 2026-11-02).  Enemy jets stay dark: 2 -> 3, explosion
+     * included.  The balloon, on OBP1: light grey body, dark grey stripe and basket: 1 -> 2,
+     * 2 -> 3.  Runs before the tiles are shared; river_tile_pat is free at boot. */
+    for (e_t = 0; e_t < ENT_GFX_TILES; e_t++) {
+        for (e_n = 0; e_n < 16u; e_n += 2u) {
+            e_l = ent_gfx_chr[(uint16_t)e_t * 16u + e_n];
+            e_r = ent_gfx_chr[(uint16_t)e_t * 16u + e_n + 1u];
+            if (e_t >= ent_gfx_first[ENT_AUX_BALLOON] &&
+                e_t < (uint8_t)(ent_gfx_first[ENT_AUX_BALLOON] + ent_gfx_count[ENT_AUX_BALLOON])) {
+                river_tile_pat[e_n] = e_r;
+                river_tile_pat[e_n + 1u] = (uint8_t)(e_l | e_r);
+            } else if (e_t == ent_gfx_first[7] ||
+                       (e_t >= ent_exp_first[7] && e_t < (uint8_t)(ent_exp_first[7] + 5u))) {
+                river_tile_pat[e_n] = (uint8_t)(e_l | e_r);
+                river_tile_pat[e_n + 1u] = e_r;
+            } else {
+                river_tile_pat[e_n] = e_l;
+                river_tile_pat[e_n + 1u] = e_r;
+            }
+        }
+        set_sprite_data((uint8_t)(ENT_TILE_BASE + e_t), 1, river_tile_pat);
+    }
+#else
     set_sprite_data(ENT_TILE_BASE, ENT_GFX_TILES, ent_gfx_chr);
+#endif
     set_sprite_data(MISSILE_TILE, 1, msl_tile);
 }
 

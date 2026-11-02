@@ -45,3 +45,9 @@ Append-only. Do not read whole; grep for a keyword and read the matching `### da
 - `build_gbc.ps1 -Dmg` / `PLATFORM_DMG`: queue in `river.c` (rows upload 32 px above the view, 206 needed, 226 allocated), `river_vram_copy_asm`, boot-time sprite tile sharing (167 to 124) with `dmg_tile_map` in `oam_camera`, HUD 26 tiles, one BGP + OBP0/1, low-fuel E/F blink, no VBK writes.
 - Results: fast 0.99 / 0.98 / 0.96 passes/frame on starts 0 / 2 / 3, clamps 1 / 2 / 1-2; cruise 1.00. The accepted proxy ROM: 1.00 / 0.97 / 0.95.
 - Tests: `host_river.ps1` (exact, `-Blocky`, `-Mode2600`), `host_river_fast.ps1 -Rows 20000 -JobCols 10`, new `host_river_queue.ps1` (picture identical, 0 clobbers in 24 runs, negative control 36), `-Dmg -OamCheck` and `-RiverCheck` 0 errors, new `tests/gb/dmg_check.mjs` and `sprite_check.mjs` pass. `river_raid.gb`, `_slow`, `_2600`, `_2600_slow` and `.nes` are byte-identical to before. Screens looked at. Not run on a real DMG; the user's playtest is next.
+
+### 2026-11-02 - DMG ROM passes the user's playtest; FUEL and balloon colours (branch `dmg-exact`)
+
+- The user played `roms/river_raid_dmg.gb`: "absolutely flawless", every checklist item passes. Then asked for FUEL in dark and light grey, and a light grey balloon with a dark grey stripe and basket.
+- `OBP0` colour 2 is light grey. That would have washed out enemy jets (colour 2 only), so they and their explosion move to colour 3 at upload. Balloon on `OBP1` (`gen_entity_gfx.py`: DMG `ent_gfx_pal`), colours shifted up at upload. `dmg_check.mjs` expects those indexes.
+- Tests: GBC, slow, 2600, 2600 slow and NES ROMs byte-identical; `host_river.ps1`, `host_river_queue.ps1`, `-Dmg -OamCheck` and `-RiverCheck` 0 errors, `dmg_check.mjs`, `sprite_check.mjs`; fast 1.00 / 0.98 / 0.96. Screens of balloon, FUEL and enemy jet looked at. Not yet seen by the user.

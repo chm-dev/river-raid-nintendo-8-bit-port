@@ -224,7 +224,11 @@ out_c += carr("const uint8_t ent_exp_first[18]", exp_first)
 out_c += carr("const uint8_t ent_gfx_count[18]", count)
 out_c += carr("const uint8_t ent_gfx_rows[18]", rows_of)
 out_c += carr("const uint8_t ent_gfx_cols[18]", cols_of)
-out_c += carr("const uint8_t ent_gfx_pal[18]", pal)
+# DMG: the balloon is on OBP1 whole, as OBP0's colour 1 is the jet's black (see entities_init_graphics).
+dmg_pal = list(pal)
+dmg_pal[BALLOON] = 1
+out_c += "#ifdef PLATFORM_DMG\n" + carr("const uint8_t ent_gfx_pal[18]", dmg_pal) + "#else\n"
+out_c += carr("const uint8_t ent_gfx_pal[18]", pal) + "#endif\n"
 out_c += carr("const uint8_t ent_exp14_map[60]", exp14_map, 12)
 out_c += "const uint8_t ent_gfx_palette[3][3] = {\n" + "".join(
     "    { " + ", ".join(f"0x{c:02X}" for c in PALETTES[g]) + " },\n" for g in (1, 2, 3)) + "};\n"
