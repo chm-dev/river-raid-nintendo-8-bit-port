@@ -34,7 +34,3 @@ Append-only. Do not read whole; grep for a keyword and read the matching `### da
 ### 2026-11-02 - Fix: entity sprites invisible in the Stage 1b ROMs (branch `river-2600`)
 
 - User playtest: all sprites but the jet invisible, both ROMs. `ent_emit_row`'s pointer rewrite and `ent_emit_asm` wrote the NES byte order (y, tile, prop, x), not the GB's (y, x, tile, prop); `-OamCheck` compared them with each other. Fixed both; the C uses named fields. New `tests/gb/sprite_check.mjs` checks the hardware OAM against `ent_x`/`ent_y`: 26/26 missing before, 0/49 after. Screenshots show enemies. Re-measured: proxy 0.99, double speed 1.00, as before. Playtest pending again.
-
-### 2026-11-02 - Fix: entity sprites invisible in the Stage 1b ROMs (branch `river-2600`)
-
-- User playtest: all sprites but the jet invisible, both ROMs. `ent_emit_row`'s pointer rewrite and `ent_emit_asm` wrote the NES byte order (y, tile, prop, x), not the GB's (y, x, tile, prop); `-OamCheck` compared them with each other. Fixed both; the C uses named fields. New `tests/gb/sprite_check.mjs` checks the hardware OAM against `ent_x`/`ent_y`: 26/26 missing before, 0/49 after. Screenshots show enemies. Re-measured: proxy 0.99, double speed 1.00, as before. Playtest pending again.
