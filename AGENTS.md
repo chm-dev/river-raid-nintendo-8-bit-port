@@ -56,4 +56,5 @@ Gearboy is the GB/GBC emulator with an MCP server. The folder is gitignored and 
 - **The user runs the playtests.** Build the ROM, then hand over a checklist. Do not drive the emulator to confirm gameplay fixes.
 - **Bugs and features:** `BUGS&FEATS.md`. Mark a fix `[~]` until the user confirms it in play, then `[x]`.
 - **Branches:** work on `main`. Branch only for risky or throwaway experiments, never a scratch copy of the tree.
+- **Never push.** Commit locally and stop; the user pushes to origin themselves. Do not run `git push`.
 - **Session end:** the steps are at the bottom of `HANDOFF.md`. Do not edit `AGENTS.md` for status.
