@@ -103,6 +103,17 @@ static uint8_t rg_row_island_right;
 static uint8_t rg_row_pos;
 static uint8_t rg_ysave;
 
+/* -DRIVER_2600: the generator of xex/River Raid 2600.xex (see docs/MOD_2600_SPEC.md).
+ * The mod patches the "cmp #$08" operand at $A89F to $EA, so the bank only picks a
+ * direction when $C3 is 0 and never moves again until it flips, and it zeroes the
+ * bridge walk table at $BA8F.  The banks stay straight and the river changes width
+ * by ramps. */
+#ifdef RIVER_2600
+#define RIVER_NIB_PASS      0xEAu
+#else
+#define RIVER_NIB_PASS      8u
+#endif
+
 /* The 32-entry bank-walk table at $BA8F. */
 static const uint8_t river_walk[32] = {
     0x00, 0x01, 0xFF, 0xFF, 0x00, 0x01, 0x00, 0x00,
@@ -1145,7 +1156,9 @@ static void river_step_state(void) {
     /* $A826 bank clamp / direction. */
     if (rg_flags23 & 0x80u) {
         rg_c3 = 0;
+#ifndef RIVER_2600
         rg_left = (uint8_t)(rg_left + river_walk[rg_rowcount]);
+#endif
     } else {
         uint8_t skip = 0;
 
@@ -1191,7 +1204,7 @@ static void river_step_state(void) {
                 if (rg_c3 == 0u) {
                     rg_c3 = (nib >= 8u) ? 0x01u : 0xFFu;
                     river_clamp_decision();
-                } else if (nib < 8u) {
+                } else if (nib < RIVER_NIB_PASS) {
                     /* $A89E: skip the bank move this row */
                 } else if (nib == 0x0Du) {
                     rg_c3 ^= 0xFEu;

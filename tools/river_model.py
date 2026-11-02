@@ -35,11 +35,16 @@ def rom(a: int, n: int) -> bytes:
 # $A89F is the operand of "cmp #$08" at $A89E.  The 2600 mod patches it to $EA, so the
 # "nib < threshold" test always passes and the direction logic below never runs.
 NIB_PASS = ROM[0x89F]
+# RIVER_2600=1 applies the mod's generator behaviour to the original cart's tables, so the
+# host check can compare the C build (-DRIVER_2600) without the mod's texture changes.
+MODE_2600 = bool(os.environ.get("RIVER_2600"))
+if MODE_2600:
+    NIB_PASS = 0xEA
 # $A977 is the operand of "and #$20" at $A976 (feature spawn test); the mod makes it $27.
 FEATURE_MASK = ROM[0x977]
 BANK_MAIN = rom(0xB800, 16)
 BANK_ISLAND = rom(0xB810, 16)
-WALK_BA8F = rom(0xBA8F, 32)
+WALK_BA8F = bytes(32) if MODE_2600 else rom(0xBA8F, 32)
 DEFAULTS_BAE1 = rom(0xBAE1, 0x13)
 # The ROM tables are contiguous; the original can index past the nominal
 # 22/23 entries when min($5F,$2C) is large at level >= 10, so keep the bytes
