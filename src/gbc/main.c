@@ -229,60 +229,60 @@ static void oam_camera_slow(void) {
 
 #define OAM_SHOT_SLOT       47u     /* = PLAYER_SHOT_SLOT in player.c */
 static uint8_t oam_cam_filled = 40u; /* hardware slots written by the last pass (40: boot, unknown) */
+static uint8_t oam_cam_xbase;
+static uint8_t oam_cam_x;
 
 /* The common case (no pause menu): same output as oam_camera_slow, walking the
  * arrays by pointer.  The per-slot work is what costs here (64 slots, most of
  * them empty), so index arithmetic and the pause test stay out of the loop. */
 static void oam_camera(void) {
-    const OAM_item_t *s;
-    OAM_item_t *d;
-    uint8_t i, n, y, x, xbase;
+    const uint8_t *s;
+    uint8_t *d;
+    uint8_t i, y;
 
     if (player_state == GBC_PLAYER_STATE_PAUSE) {
         oam_camera_slow();
         oam_cam_filled = 40u;
         return;
     }
-    xbase = (uint8_t)(SOURCE_X_OFFSET + camera_x - 8u);
-    s = gbc_logic_oam;
-    d = shadow_OAM;
-    n = 40u;
+    oam_cam_xbase = (uint8_t)(SOURCE_X_OFFSET + camera_x - 8u);
+    s = (const uint8_t *)gbc_logic_oam;
+    d = (uint8_t *)shadow_OAM;
     /* Outside the pause menu only slots below ent_oam_used and the shot are live. */
     i = ent_oam_used;
 next_range:
-    for (; i != 0u; i--, s++) {
-        y = s->y;
-        if (y >= ENT_CULL_Y) {
+    /* Byte pointers and few locals: SDCC then keeps s and d in registers.  A hidden
+     * sprite (y >= 240) fails the Y test as well. */
+    for (; i != 0u; i--, s += 4u) {
+        y = (uint8_t)(*s - (GBC_VIEW_TOP_SCANLINE - 7u));       /* vy + 7 */
+        if (y >= (uint8_t)(GBC_VIEW_LINES + 7u)) {
             continue;
         }
-        y = (uint8_t)(y - (GBC_VIEW_TOP_SCANLINE - 8u));        /* vy + 8 */
-        x = (uint8_t)(s->x - xbase);                            /* vx + 8 */
-        if ((uint8_t)(y - 1u) >= (uint8_t)(GBC_VIEW_LINES + 7u) ||
-            (uint8_t)(x - 1u) >= 167u) {
+        oam_cam_x = (uint8_t)(s[1] - oam_cam_xbase);            /* vx + 8 */
+        if ((uint8_t)(oam_cam_x - 1u) >= 167u) {
             continue;
         }
-        d->y = (uint8_t)(y + 8u);
-        d->x = x;
-        d->tile = s->tile;
-        d->prop = (uint8_t)(s->prop | S_BANK);
-        d++;
-        if (--n == 0u) {
+        *d++ = (uint8_t)(y + 9u);
+        *d++ = oam_cam_x;
+        *d++ = s[2];
+        *d++ = (uint8_t)(s[3] | S_BANK);
+        if ((uint8_t)(uint16_t)d == 160u) {     /* shadow_OAM is page aligned */
             oam_cam_filled = 40u;
             return;
         }
     }
-    if (s != &gbc_logic_oam[OAM_SHOT_SLOT + 1u]) {
-        s = &gbc_logic_oam[OAM_SHOT_SLOT];
+    if (s != (const uint8_t *)&gbc_logic_oam[OAM_SHOT_SLOT + 1u]) {
+        s = (const uint8_t *)&gbc_logic_oam[OAM_SHOT_SLOT];
         i = 1u;
         goto next_range;
     }
-    /* Hardware slots past n are hidden already, up to where the last pass ended. */
+    /* Hardware slots past d are hidden already, up to where the last pass ended. */
     i = oam_cam_filled;
-    oam_cam_filled = (uint8_t)(40u - n);
+    oam_cam_filled = (uint8_t)((uint8_t)(uint16_t)d >> 2);
     i = (i > oam_cam_filled) ? (uint8_t)(i - oam_cam_filled) : 0u;
     while (i != 0u) {
-        d->y = 0u;
-        d++;
+        *d = 0u;
+        d += 4u;
         i--;
     }
 }

@@ -911,23 +911,29 @@ uint8_t entities_hit_shot(uint8_t sx, uint8_t sy) BANKED {
  * as inline asm must be. */
 static void ent_scan_player(void) {
 #ifndef __SDCC_mos6502
-    for (; e_i < MAX_ENTITIES; e_i++) {
-        e_type = ent_type[e_i];
-        if (e_type == ENT_AUX_SHELL) {
-            if (ent_aux[e_i] >= SHELL_FLY_FRAMES) {
+    /* Pointers, not ent_y[e_i]: no calls in this loop, and each indexed access costs
+     * ~14 M-cycles on the sm83. */
+    const uint8_t *tp = &ent_type[e_i];
+    const uint8_t *yp = &ent_y[e_i];
+    uint8_t t, v;
+
+    for (; e_i < MAX_ENTITIES; e_i++, tp++, yp++) {
+        t = *tp;
+        if (t < ENT_AUX_JET) {
+            continue;
+        }
+        if (t > ENT_AUX_FUEL) {
+            if (t == ENT_AUX_SHELL && ent_aux[e_i] >= SHELL_FLY_FRAMES) {
                 return;
             }
             continue;
         }
-        if (e_type < ENT_AUX_JET || e_type > ENT_AUX_FUEL) {
+        v = *yp;
+        if ((uint8_t)(v - e_y) >= 14u && (uint8_t)(e_y - v) >= ent_gfx_rows[t]) {
             continue;
         }
-        if ((uint8_t)(ent_y[e_i] - e_y) >= 14u &&
-            (uint8_t)(e_y - ent_y[e_i]) >= ent_gfx_rows[e_type]) {
-            continue;
-        }
-        if ((uint8_t)(ent_x[e_i] - e_px) >= 8u &&
-            (uint8_t)(e_px - ent_x[e_i]) >= ent_width(e_type)) {
+        v = ent_x[e_i];
+        if ((uint8_t)(v - e_px) >= 8u && (uint8_t)(e_px - v) >= ent_width(t)) {
             continue;
         }
         return;
@@ -1270,12 +1276,14 @@ static uint8_t e_dx;
  * version took ~190 cycles per sprite, this ~45. */
 static void ent_emit_row(void) {
 #ifndef __SDCC_mos6502
-    /* Host build (tests/host/spawn_main.c): same thing in C. */
+    /* GBC and host build (tests/host/spawn_main.c): same thing in C. */
+    volatile uint8_t *d = (volatile uint8_t *)shadow_OAM + e_off;
+
     for (e_n = e_cols; e_n != 0u && e_off < 176u; e_n--, e_off = (uint8_t)(e_off + 4u)) {
-        shadow_OAM[e_off >> 2].y = e_y;
-        shadow_OAM[e_off >> 2].tile = e_tile++;
-        shadow_OAM[e_off >> 2].prop = e_prop;
-        shadow_OAM[e_off >> 2].x = e_px;
+        *d++ = e_y;
+        *d++ = e_tile++;
+        *d++ = e_prop;
+        *d++ = e_px;
         e_px = (uint8_t)(e_px + e_dx);
     }
 #else
@@ -1557,11 +1565,16 @@ void entities_follow(void) BANKED {
         return;
     }
 #ifndef __SDCC_mos6502
-    for (e_t = ENT_OAM_TANK; e_t < ent_oam_used; e_t++) {
-        if (shadow_OAM[e_t].y >= ENT_CULL_Y) {
-            continue;
+    {
+        volatile uint8_t *y = (volatile uint8_t *)&shadow_OAM[ENT_OAM_TANK];
+        uint8_t v;
+
+        for (e_t = ENT_OAM_TANK; e_t < ent_oam_used; e_t++, y += 4u) {
+            v = *y;
+            if (v < ENT_CULL_Y) {
+                *y = (uint8_t)(v + river_rows_last);
+            }
         }
-        shadow_OAM[e_t].y = (uint8_t)(shadow_OAM[e_t].y + river_rows_last);
     }
 #else
     e_off = (uint8_t)(ent_oam_used << 2);
@@ -1700,13 +1713,13 @@ void entities_update(void) BANKED {
         if (e_type == ENT_AUX_TANK && (ent_flags[e_i] & ENT_F_WAIT)) {
             continue;                       /* no position until the bar is placed */
         }
-        ent_y[e_i] = (uint8_t)(ent_y[e_i] + river_scrolled);    /* the shell too ($AB7E: inc $40) */
-        if (ent_y[e_i] >= ENT_CULL_Y && ent_y[e_i] < 250u) {
+        e_y = (uint8_t)(ent_y[e_i] + river_scrolled);           /* the shell too ($AB7E: inc $40) */
+        ent_y[e_i] = e_y;
+        if (e_y >= ENT_CULL_Y && e_y < 250u) {
             ent_type[e_i] = ENTITY_NONE;
             entity_count--;
             continue;
         }
-        e_type = ent_type[e_i];
         if (e_type >= ENT_AUX_TANK) {
             if (!river_freeze && !ent_hold) {
                 for (e_n = 0; e_n < game_ticks; e_n++) {
