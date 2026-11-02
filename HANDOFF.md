@@ -29,7 +29,7 @@ Cruise is 1.00 with 0 clamps on both 2600 ROMs.
 
 Parked: **smooth blocky edges** (user's idea, in `BUGS&FEATS.md`; do not start before the playtest unless asked), island bands on the fast path (step 6: not needed for the gates, and needs the user's OK to move code between banks), houses/trees snapped to the grid.
 
-**Per-step check:** `host_river_fast.ps1 -Rows 20000 -JobCols 10`, `host_river.ps1 -Blocky` and `host_river.ps1` (exact), `.\build.ps1` (NES, then rebuild GBC), bank 0 end in the `.map`, profile fast + cruise with `.\build_gbc.ps1 -ProfExport -River2600 [-DmgProxy] -Name <rom>` and `$env:GB_NOI='roms/<rom>.noi'; node tests/gb/profile_play.mjs fast|cruise 40` (`$env:GB_START_LEVEL=n` for another start). **After touching assembly or its C twin:** `-OamCheck` and `-RiverCheck` ROMs, run with `profile_play.mjs`: all error counts must be 0.
+**Per-step check:** `host_river_fast.ps1 -Rows 20000 -JobCols 10`, `host_river.ps1 -Blocky` and `host_river.ps1` (exact), `.\build.ps1` (NES, then rebuild GBC), bank 0 end in the `.map`, profile fast + cruise with `.\build_gbc.ps1 -ProfExport -River2600 [-DmgProxy] -Name <rom>` and `$env:GB_NOI='roms/<rom>.noi'; node tests/gb/profile_play.mjs fast|cruise 40` (`$env:GB_START_LEVEL=n` for another start). **After touching assembly or its C twin:** `-OamCheck` and `-RiverCheck` ROMs, run with `profile_play.mjs`: all error counts must be 0. **Those only compare assembly with C, so a shared mistake passes:** also run `tests/gb/sprite_check.mjs` on the player ROM and look at its screenshot before handing a ROM over.
 
 ## Playtest checklist (`roms/river_raid_2600_slow.gb`; `roms/river_raid_2600.gb` for double speed)
 
@@ -71,6 +71,7 @@ Parked: **smooth blocky edges** (user's idea, in `BUGS&FEATS.md`; do not start b
 - Measured over 10 s windows from three start levels, with the jet invulnerable and only holding Up. Not measured: long runs, heavy shooting, level 13+ fast helicopters at speed.
 - The proxy is a GBC at single speed: it still pays for the GBC attribute writes and has no real-DMG test behind it. Sound is ported in the ROM; a DMG build is not started.
 - `river_mixed_col` needs `river_lut_p1` to follow `river_lut_p0` in ROM (declaration order in `river_lut.h`); `-RiverCheck` shows it if that ever changes. `ent_draw_asm` and friends have compile-time asserts for their constants.
+- `sprite_check.mjs` runs on the first start level only, checks position and tile range but not which tile or palette, and covers types 7..15 (no explosions, tank or shell). Those still rest on the playtest.
 - Host-only finding, not new: the default exact build (not 2600) reports `clobbered 134` on start index 3 (a tile id reused while still on screen, 27 rows after it was written). Same before and after this work; not investigated.
 - `ent_skipped` pass kinds and the host check do not cover roads, bridges, the land-colour flip and restarts in the fast path (the ROM self-checks do cover the conversion there). The playtest covers them.
 - Edges: left rounds down, right rounds up, so the player may be up to 7 px from a drawn bank before the true bank.

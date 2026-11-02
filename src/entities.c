@@ -1396,14 +1396,14 @@ static void ent_emit_asm(void) {
         ld      a, c
         cp      a, #176
         jr      NC, 2$
-        ld      a, (_e_y)
+        ld      a, (_e_y)           ; GB order: y, x, tile, prop
+        ld      (hl+), a
+        ld      a, d
         ld      (hl+), a
         ld      a, e
         ld      (hl+), a
         inc     e
         ld      a, (_e_prop)
-        ld      (hl+), a
-        ld      a, d
         ld      (hl+), a
         ld      a, (_e_dx)
         add     a, d
@@ -1430,13 +1430,15 @@ static void ent_emit_asm(void) {
 static void ent_emit_row(void) {
 #ifndef __SDCC_mos6502
     /* GBC and host build (tests/host/spawn_main.c): same thing in C. */
-    volatile uint8_t *d = (volatile uint8_t *)shadow_OAM + e_off;
+    /* Named fields: the byte order differs between the NES and the GB, and this is the
+     * reference the assembly is compared with. */
+    volatile OAM_item_t *d = (volatile OAM_item_t *)((volatile uint8_t *)shadow_OAM + e_off);
 
-    for (e_n = e_cols; e_n != 0u && e_off < 176u; e_n--, e_off = (uint8_t)(e_off + 4u)) {
-        *d++ = e_y;
-        *d++ = e_tile++;
-        *d++ = e_prop;
-        *d++ = e_px;
+    for (e_n = e_cols; e_n != 0u && e_off < 176u; e_n--, e_off = (uint8_t)(e_off + 4u), d++) {
+        d->y = e_y;
+        d->tile = e_tile++;
+        d->prop = e_prop;
+        d->x = e_px;
         e_px = (uint8_t)(e_px + e_dx);
     }
 #else
