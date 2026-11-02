@@ -54,7 +54,10 @@ Short, current, rewritten every session. Rules are in `AGENTS.md`; the plan is `
 
 ## Known gaps
 
-- Bank 0 is nearly full in the 2600 build: ~400 bytes free (~100 with `-ProfExport`). `river_debug_state` and the stats counters are compiled out there (`RIVER_STATS` is host only).
+- Bank 0 is nearly full in the 2600 build: ~350 bytes free (~60 with `-ProfExport`). `river_debug_state` and the stats counters are compiled out there (`RIVER_STATS` is host only). **Houses/trees were dropped, not snapped, and the island fast path will not fit** unless code leaves bank 0 (a structural choice for the user).
+- Untested on the host: roads, bridges (mixed fast/exact bands, `river_band_replay`), the land-colour flip and restarts (atlas reset). The checklist covers them; a mixed band costs one 110k replay.
+- Edges: left rounds down, right rounds up (drawn river contains the true river), so the spawner's objects stand on water; the player may be up to 7 px from a drawn bank before the true bank.
+- Atlas: 32 tiles used over 20,000 rows x 4 start levels, 40 reserved, exact ring 210 slots (peak 182). `host_river_fast.ps1` flags clobbered visible cells.
 - The default (exact) GBC build is +7 bytes of code against the pre-2600 ROM; the host check and the NES build pass.
 - `river.c` emits harmless `always false` / `unreachable code` warnings (the 2600 flags make more).
 - `RIVER_GRID=4` fails `host_river_fast.ps1` (the atlas fills up; a mismatch not yet analysed). Only grid 8 is verified.
