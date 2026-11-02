@@ -22,7 +22,7 @@ await c.init();
 await c.call('set_profiler', { action: 'start' });
 await c.call('debug_continue');
 await sleep(3000);                               /* boot: Start before this is ignored */
-/* GB_START_LEVEL=n: Up n times in the attract menu (0..3 = levels 1, 5?, 20, 30: atari_level_descriptors). */
+/* GB_START_LEVEL=n: Up n times in the attract menu: start index 0..3 (2 = level 20, islands). */
 for (let i = 0; i < Number(process.env.GB_START_LEVEL || 0); i++) {
     await c.call('controller_button', { action: 'press', button: 'up', player: 1 });
     await sleep(200);

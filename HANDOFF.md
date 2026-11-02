@@ -2,39 +2,44 @@
 
 Short, current, rewritten every session. Rules are in `AGENTS.md`; the plan is `PLAN_2600.md`; history is `PROGRESS.md` (grep it, do not read whole). The proposal is `docs/PROPOSAL_2600_RIVER_MODE.md`.
 
-**Last updated:** 2026-11-02 · **Branch:** `river-2600` · **Phase:** Stage 1 built; the user played the single-speed proxy ROM: "almost acceptable but still not there". **Current focus: Stage 1b, performance** (`PLAN_2600.md`), until the DMG-clock proxy is acceptable. Gates X=1.00 / Y=0.60 not met (0.97 / 0.57).
+**Last updated:** 2026-11-02 · **Branch:** `river-2600` · **Phase:** Stage 1b performance done on the numbers: gates met (X 1.00, Y 0.99 against 1.00 / 0.60). **Waiting for the user's playtest of the proxy ROM.**
 
 ## Where we are
 
 - GBC port finished on `main` (architecture: `archive/gbc/HANDOFF.md`). This branch adds a **2600-style river** so a DMG build becomes possible.
 - The mod (`xex/River Raid 2600.xex`) is the original cart with 961 patched bytes (`docs/MOD_2600_SPEC.md`). Its river = the original generator with straight banks (patch `$A89F`), no bridge wobble, more features. Captures: `assets/atari/river2600/`.
-- **Implemented (GBC, `build_gbc.ps1 -River2600`):** flags `RIVER_2600` (mod generator), `RIVER_BLOCKY` (edges on an 8 px grid, ramps one 8 px step per 8 rows; `RIVER_GRID=4` is experimental), `RIVER_NOFEAT` (no houses/trees), `RIVER_FAST` (a tile row of plain rows becomes tile ids from a lazily built edge atlas, no rendering). Islands, roads, narrow (8 px) rivers and jumps above 16 px still take the exact path. `tools/river_model.py` has the same switches (`RIVER_2600=1`, `RIVER_BLOCKY=1`, `RIVER_GRID`).
-- **Measured** (level 1, `PLAN_2600.md` tables): fast flight 0.76 -> 0.97 passes/frame at double speed; DMG proxy (`-DmgProxy`) 0.37 -> 0.57. `river_update` avg 33.9k -> 8.9k units.
+- **River (GBC, `build_gbc.ps1 -River2600`):** flags `RIVER_2600`, `RIVER_BLOCKY` (edges on an 8 px grid), `RIVER_NOFEAT` (no houses/trees), `RIVER_FAST` (a tile row of plain rows becomes ids from a lazily built edge atlas). Islands, roads, narrow rivers and jumps above 16 px take the exact path.
+- **Pacing changed:** a finished pass publishes scroll and an OAM page (`publish_pass`, second page at `$D000`) and the VBlank handler shows it; the next pass starts at once if a frame has gone by. `vsync()` used to turn a pass of 1.01 frames into 2.
+- **Assembly is allowed now** (user). sm83 routines: `oam_camera_core`, `ent_draw_asm`, `ent_emit_asm`, `ent_follow_asm`, `ent_scan_asm`, `river_scan_solid`, `river_mixed_col`, `river_copy_line_asm`, `river_pat_equal_asm`, `river_fill_core`. All have a C reference; the host harness only runs the C.
+- **Measured** (fast flight, 10 s; start index 0 / 2 / 3; details in `PLAN_2600.md`):
+
+| ROM | Passes/frame | Clamps | Before Stage 1b |
+|---|---|---|---|
+| 2600, double speed | 1.00 / 1.00 / 1.00 | 0 / 0 / 0 | 0.97 (index 0) |
+| 2600, DMG proxy | 0.99 / 0.99 / 0.99 | 0 / 2 / 1 | 0.57 (index 0) |
+| Default exact river, double speed | 1.00 (index 0) | 0 | 0.76 |
+
+Cruise is 1.00 with 0 clamps on both 2600 ROMs.
 
 ## Next steps
 
-Do **Stage 1b in `PLAN_2600.md`, in order** (it has the baseline split, the recipe and a results table to fill in):
+1. **User playtests `roms/river_raid_2600_slow.gb`** (checklist below). Rebuild: `.\build_gbc.ps1 -River2600 -DmgProxy -Name river_raid_2600_slow`.
+2. Act on what the playtest shows. If hitches remain, the known peaks are in `PLAN_2600.md` ("What is left in the peaks"): first-use atlas builds, road rows, band replays (step 5).
+3. Stage 1 check and the DMG decision are the user's. Gates A and Z are unset.
 
-1. **Profile inside entities/player** (~49k of the ~123k units per pass at the proxy clock; never looked inside). `python tools/resolve_sub.py` names the `SUB_` entries (rebuild the GBC ROM last: the NES build overwrites `roms/river_raid.noi`).
-2. Cut what step 1 shows (fewer banked calls per pass, skip unchanged work).
-3. `oam_camera` (14k per pass at the proxy clock): dirty-sprite skip; assembly only after the DMG gate.
-4. Stripe write (bulk write in VBlank, only changed cells, no attribute pass unless the palette changes).
-5. Replay spikes (min river width 16 px + third jump size in model and C, spread mixed-band replays).
-6. Island bands on the fast path. **Will not fit in bank 0** (~350 bytes free): ask the user before moving code between banks. Needs a profile that starts on an even level (`river_init(2)`).
-7. Re-measure, then ask the user to playtest the `-DmgProxy` ROM again.
+Parked: **smooth blocky edges** (user's idea, in `BUGS&FEATS.md`; do not start before the playtest unless asked), island bands on the fast path (step 6: not needed for the gates, and needs the user's OK to move code between banks), houses/trees snapped to the grid.
 
-Parked: **smooth blocky edges** (user's idea, in `BUGS&FEATS.md`; do not start before step 7 unless asked), sound (not ported), houses/trees snapped to the grid.
+**Per-step check:** `host_river_fast.ps1 -Rows 20000 -JobCols 10`, `host_river.ps1 -Blocky` and `host_river.ps1` (exact), `.\build.ps1` (NES, then rebuild GBC), bank 0 end in the `.map`, profile fast + cruise with `.\build_gbc.ps1 -ProfExport -River2600 [-DmgProxy] -Name <rom>` and `$env:GB_NOI='roms/<rom>.noi'; node tests/gb/profile_play.mjs fast|cruise 40` (`$env:GB_START_LEVEL=n` for another start). **After touching assembly or its C twin:** `-OamCheck` and `-RiverCheck` ROMs, run with `profile_play.mjs`: all error counts must be 0.
 
-**Per-step check:** `host_river_fast.ps1 -Rows 20000 -JobCols 10`, `host_river.ps1 -Blocky` and `host_river.ps1` (exact), `.\build.ps1` (NES, then rebuild GBC), bank 0 end in the `.map`, profile fast + cruise with `.\build_gbc.ps1 -ProfExport -River2600 [-DmgProxy] -Name <rom>` and `$env:GB_NOI='roms/<rom>.noi'; node tests/gb/profile_play.mjs fast|cruise 12` (Gearboy launch line: `AGENTS.md`).
+## Playtest checklist (`roms/river_raid_2600_slow.gb`; `roms/river_raid_2600.gb` for double speed)
 
-## Playtest checklist (`roms/river_raid_2600.gb`)
-
-- River edges are straight and move in 8 px steps; no houses or trees. Does it read as a river? Does it feel like a 2600?
-- Fast flight (hold Up) feels smooth at 60 Hz, cruise too; note any hitch (expected: an occasional one when the river narrows or at an island).
-- Collision: the jet dies exactly where the bank is drawn (left and right, also on slopes).
-- Islands (even levels, e.g. after the first bridge): look and collision; fuel and enemies appear where they should.
-- Bridges and the road across the land at the start; lives lost and restart; level change.
-- Compare with `roms/river_raid.gb` (build `.\build_gbc.ps1`) if in doubt.
+- **Hold Up on level 1 and on a later start level (Up in the attract menu):** is fast flight smooth now? Note any hitch and where (expected: briefly on first use of new edge shapes in the first seconds, and at bridges).
+- **Sprites against the river (new pacing and new assembly):** enemies, fuel and the jet sit still relative to the water; no flicker, no sprite left behind, none popping in at the top of the view. Mirrored ships and helicopters, the balloon's brown basket, explosions, bridge debris, tank and shell look right.
+- **Collision:** the jet dies exactly where the bank is drawn; enemies and fuel hit where drawn (the player scan is new assembly); shots hit.
+- **HUD:** score, fuel gauge, lives and bridge number update promptly, including the low-fuel colours and the bridge flash.
+- **Islands (even levels), bridges, roads:** look right, the land colour flips at a bridge.
+- **Flows:** lives lost and restart, game over, pause menu (letters, cursor, resume, exit), level change, attract screen.
+- River look: straight edges in 8 px steps, no houses or trees. Does it read as a river and feel like a 2600?
 
 ## Decisions not to reopen
 
@@ -56,20 +61,22 @@ Parked: **smooth blocky edges** (user's idea, in `BUGS&FEATS.md`; do not start b
 | River code | `src/river.c` ("Band fast path" section), `tools/river_model.py` |
 | Host checks | `tests/host_river.ps1` (`-Mode2600`, `-Blocky [-Grid 4]`), `tests/host_river_fast.ps1` (fast path = exact path, pixel for pixel) |
 | Builds | `.\build_gbc.ps1 [-River2600] [-DmgProxy] [-ProfExport] [-Define RIVER_GRID=4]`; `.\build.ps1` (NES) |
-| Profiling | `tests/gb/run_emu.ps1 tests/gb/profile_play.mjs fast\|cruise` (set `GB_NOI` for another ROM) |
+| Profiling | `tests/gb/profile_play.mjs` (with `tools/prof_summary.py`), `tests/gb/trace_prof.mjs` + `tools/trace_hist.py` (per-phase, worst passes; sees inside banked calls) |
 | Atari behaviour / RE tools | `docs/ATARI_RE_SPEC.md`, `info/LESSONS.md`, `tools/README.md` |
 | GBC / NES history | `archive/gbc/`, `archive/nes/` |
 
 ## Known gaps
 
-- Bank 0 is nearly full in the 2600 build: ~350 bytes free (~60 with `-ProfExport`). `river_debug_state` and the stats counters are compiled out there (`RIVER_STATS` is host only). **Houses/trees were dropped, not snapped, and the island fast path will not fit** unless code leaves bank 0 (a structural choice for the user).
-- Untested on the host: roads, bridges (mixed fast/exact bands, `river_band_replay`), the land-colour flip and restarts (atlas reset). The checklist covers them; a mixed band costs one 110k replay.
-- Edges: left rounds down, right rounds up (drawn river contains the true river), so the spawner's objects stand on water; the player may be up to 7 px from a drawn bank before the true bank.
-- Atlas: 32 tiles used over 20,000 rows x 4 start levels, 40 reserved, exact ring 210 slots (peak 182). `host_river_fast.ps1` flags clobbered visible cells.
-- The default (exact) GBC build is +7 bytes of code against the pre-2600 ROM; the host check and the NES build pass.
-- `river.c` emits harmless `always false` / `unreachable code` warnings (the 2600 flags make more).
-- `RIVER_GRID=4` fails `host_river_fast.ps1` (the atlas fills up; a mismatch not yet analysed). Only grid 8 is verified.
-- The "GBC REQUIRED" screen has never run on a plain Game Boy. Player and entity group costs show only as `___sdcc_bcall_ehl` / `SUB_` names.
+- Bank 0 in the 2600 build ends at `$3F40` (~190 bytes free; `-ProfExport` no longer adds to it). The check ROMs drop the "GBC REQUIRED" text to fit. **Houses/trees were dropped, not snapped.**
+- Measured over 10 s windows from three start levels, with the jet invulnerable and only holding Up. Not measured: long runs, heavy shooting, level 13+ fast helicopters at speed.
+- The proxy is a GBC at single speed: it still pays for the GBC attribute writes and has no real-DMG test behind it. Sound is ported in the ROM; a DMG build is not started.
+- `river_mixed_col` needs `river_lut_p1` to follow `river_lut_p0` in ROM (declaration order in `river_lut.h`); `-RiverCheck` shows it if that ever changes. `ent_draw_asm` and friends have compile-time asserts for their constants.
+- Host-only finding, not new: the default exact build (not 2600) reports `clobbered 134` on start index 3 (a tile id reused while still on screen, 27 rows after it was written). Same before and after this work; not investigated.
+- `ent_skipped` pass kinds and the host check do not cover roads, bridges, the land-colour flip and restarts in the fast path (the ROM self-checks do cover the conversion there). The playtest covers them.
+- Edges: left rounds down, right rounds up, so the player may be up to 7 px from a drawn bank before the true bank.
+- Atlas: 32 tiles used over 20,000 rows x 4 start levels, 40 reserved, exact ring 210 slots (peak 182).
+- `RIVER_GRID=4` fails `host_river_fast.ps1`; only grid 8 is verified. `river.c` emits harmless `always false` / `unreachable code` warnings.
+- The "GBC REQUIRED" screen has never run on a plain Game Boy.
 
 ## End of session (keep this cheap)
 

@@ -7,7 +7,7 @@
 If approved, this proposal reopens three current rules:
 - **"No river atlas"** (`AGENTS.md` rule 6, `HANDOFF.md` decisions). A 2600 river is built from straight and angled edges, so a fixed edge-tile atlas becomes possible.
 - **"DMG is dropped."** DMG is the whole motivation, but it is only committed to after the DMG prototype passes (see Gates).
-- **"Add no new assembly."** Not part of the prototype. It is a decision for after the DMG gate, and only for routines that still miss the budget.
+- **"Add no new assembly."** Lifted by the user on 2026-11-02: assembly is allowed wherever it pays (`PLAN_2600.md`, Stage 1b).
 
 It also does not come before the milestone 2 go/no-go that is waiting on the user.
 

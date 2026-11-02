@@ -13,7 +13,7 @@ Stable rules only. Status lives in `HANDOFF.md`; the roadmap is `GBC_PORT_PLAN.m
 ## Project overview
 Port of the Atari 8-bit **River Raid** (`xex/River Raid (1983)(Activision)(US)[a3].xex`) to the **Game Boy Color** in C, using GBDK-2020 v4.5.0 (`./gbdk`).
 - **GBC only.** DMG and Game Boy Pocket are not targets.
-- **Prototype first:** reuse the existing C code, add no new assembly, and decide on a playtest go/no-go after milestone 2.
+- **Prototype first:** reuse the existing C code and decide on a playtest go/no-go after milestone 2. Hand-written sm83 is allowed where it pays (user, 2026-11-02); keep the C version as the reference for a byte-for-byte check (`build_gbc.ps1 -OamCheck`, `-RiverCheck`).
 - **Atari ground truth:** `docs/ATARI_RE_SPEC.md`, `docs/atari_disasm_*.txt`, `assets/atari/extracted/`. The shared river generator is `tools/river_model.py` and `src/river.c`.
 - **Logic coordinates:** game logic stays in NES-era coordinates (X = Atari HPOS, Y = NES scanlines 30..239). Only drawing goes through a camera.
 - **HUD art:** do not redraw. `assets/atari/extracted/charset.bin` holds the original art; see `assets/atari/extracted/README.md` → "HUD glyph inventory".
