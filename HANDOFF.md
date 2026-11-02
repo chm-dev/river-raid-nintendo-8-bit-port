@@ -30,6 +30,8 @@ Short, current, rewritten every session. Rules are in `AGENTS.md`; **the plan is
 
 **Next: one ROM for both GBC and DMG, before merging to `main`** (user, 2026-11-02). Do it on `dmg-exact`; the outline is in `PLAN_DMG.md` "Dual ROM". Not started. Merging is still the user's call, after this. The user's call too: the rare bottom-row clobber on the GBC exact ROM (the dual ROM's queue should fix it there); the NES is unmeasured (`BUGS&FEATS.md`). Optional: boot time (~1.5-1.7 s blank), remaining peaks (`river_find_dup`, `river_copy_template`).
 
+**After the merge, when the user asks:** NES pacing ideas from the GB work (`archive/nes/BUGS&FEATS.md`, top of FEATURES). Not part of the dual ROM: the NES ROM stays byte-identical until then.
+
 Stale (user, 2026-11-02; do not start unless asked): 2600 river work (Stage 1b steps 5-8, Stage 2), **smooth blocky edges** (`BUGS&FEATS.md`).
 
 **Playtest checklist (passed 2026-11-02; repeat after big changes):** land and water read apart at a glance · every enemy, FUEL and the bridge are visible on water and on land · trees, houses and roads look right, no wrong tiles anywhere, including the bottom rows and just below the top of the view · fast flight feels like `river_raid_slow.gb` on start levels 1, 20 and 50 · low fuel: E and F blink · bridge shot: water flashes, and by the code the HUD text flickers with it (one `BGP`): does that bother you? · pause menu readable · crash and restart · high score after power-off · a long game past level 13 (fast helicopters).
