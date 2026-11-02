@@ -2649,6 +2649,16 @@ static uint8_t river_emit_stripe(void) {
         if (river_slot_attr[river_pending_slot] != rj_c) {
             river_slot_attr[river_pending_slot] = rj_c;
             rj_addr = (uint16_t)(PPU_NT1_BASE + ((uint16_t)river_pending_slot << 5) + RIVER_LEFT_COL);
+#ifdef PROF_NEG_ATTR                /* negative controls for tests/gb/gbc_check.mjs */
+            if (rj_c == GBC_PAL_LAND) {
+                rj_c = 1u;          /* the HUD palette on the land */
+            }
+#endif
+#ifdef PROF_NEG_ROAD
+            if (rj_c == GBC_PAL_ROAD) {
+                rj_addr += 32u;     /* the road colour one tile row late */
+            }
+#endif
             VBK_REG = 1;
             for (rj_n = 0; rj_n < RIVER_TILE_COLS; rj_n++) {
                 set_vram_byte((uint8_t *)(rj_addr + rj_n), rj_c);

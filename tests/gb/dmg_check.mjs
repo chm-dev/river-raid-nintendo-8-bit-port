@@ -1,6 +1,8 @@
 /*
- * dmg_check.mjs - is the -Dmg ROM really running as a DMG, and does its VRAM hold what the game
- * means to show?  The references are ones no ROM code produced:
+ * dmg_check.mjs - is the -Dmg ROM, or the dual ROM booted as a DMG (run_emu.ps1 -Machine dmg), really running as a
+ * DMG, and does its VRAM hold what the game means to show?  gbc_check.mjs is the GBC counterpart.  The
+ * references are ones no ROM code produced:
+ *   - the HUD tiles (bank 0 ids 229..254) against assets/atari/extracted/charset.bin;
  *   - sprite tiles: every logic id, through dmg_tile_map, against ent_gfx_chr in src/entity_gfx.c;
  *   - the river: the map cells on screen, through the tile patterns, against the edges collision
  *     uses (river_left_x / river_right_x for that ring slot, written by the generator).  A cell
@@ -34,6 +36,7 @@ let fail = 0;
 const info = txt(await c.call('get_media_info', {}));
 console.log(info.split('\n').filter(l => /cgb|gbc|dmg|color|model|type/i.test(l)).join(' | ').slice(0, 300));
 
+
 await c.call('debug_continue');
 /* Boot done: the main loop counts frames.  How long it takes is a player-visible blank screen. */
 const bootT0 = Date.now();
@@ -44,6 +47,13 @@ for (;;) {
     if (Date.now() - bootT0 > 10000) { console.log('no frame in 10 s'); process.exit(1); }
 }
 console.log(`boot ${Date.now() - bootT0} ms`);
+/* The machine, from the ROM's own flag when it has one (the dual ROM) and the CPU's speed. */
+const cpu = JSON.parse(txt(await c.call('get_cpu_status', {})));
+if (/DEF _gb_cgb /.test(noi)) {
+    const f = await wram(sym('_gb_cgb'), 1);
+    console.log(`gb_cgb ${f[0]}, double speed ${cpu.double_speed}`);
+    if (f[0] !== 0 || cpu.double_speed) { console.log('FAIL not running as a DMG'); fail++; }
+}
 await sleep(2000);
 
 /* Sprite tiles */
@@ -73,6 +83,20 @@ for (let i = 0; i * 16 < chr.length; i++) {
         }
     }
 }
+/* HUD tiles: ink in both planes, ids 229.. (digits 230..239, E F plane B 249..252, HI 253 254) */
+const charset = readFileSync('assets/atari/extracted/charset.bin');
+const hudWant = [[230, 80], [231, 81], [232, 82], [233, 83], [234, 84], [235, 85], [236, 86], [237, 87], [238, 88], [239, 89],
+                 [249, 5], [250, 6], [251, 0x5C], [252, 2], [253, 8], [254, 9]];
+let hudWrong = 0;
+for (const [id, g] of hudWant) {
+    const t = await bgTile(id);
+    for (let r = 0; r < 8; r++) {
+        const want = charset[(g + Number(process.env.DMG_CHECK_NEG || 0)) * 8 + r];     /* DMG_CHECK_NEG=1: negative control */
+        if (t[r * 2] !== want || t[r * 2 + 1] !== want) { hudWrong++; break; }
+    }
+}
+console.log(`HUD tiles not matching charset.bin: ${hudWrong} of ${hudWant.length}`);
+if (hudWrong) fail++;
 console.log(`sprite tiles allocated ${used} (budget 129), entity tiles not matching ${wrong} of ${chr.length / 16}`);
 if (used > 129 || wrong) fail++;
 await c.call('debug_continue');

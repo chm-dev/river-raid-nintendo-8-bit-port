@@ -254,6 +254,9 @@ void entities_init_graphics(void) BANKED {
         for (e_i = 0; e_i < 18u; e_i++) {
             ent_pal_run[e_i] = ent_gfx_pal[e_i];
         }
+#ifdef PROF_NEG_PAL                 /* negative control for tests/gb/gbc_check.mjs */
+        ent_pal_run[8] ^= 1u;
+#endif
     } else {
         for (e_i = 0; e_i < 18u; e_i++) {
             ent_pal_run[e_i] = ent_gfx_pal_dmg[e_i];
