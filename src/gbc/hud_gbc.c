@@ -15,8 +15,11 @@
  * cell's palette: 1 yellow (planes, score), 4 B/F, 5 E, 6 gauge.  Palettes 4..6
  * change while the low-fuel note sounds (sound_warn_on): the gauge goes red and
  * the text goes yellow.  hud_update() builds the wanted 40 cells and writes only
- * the ones that changed.  Call it right after vsync(): the writes then land in
- * VBlank.
+ * the ones that changed; the library's VRAM and palette writes wait for STAT.
+ *
+ * PLATFORM_DMG: the tiles sit at DMG_HUD_TILE_BASE in the one VRAM bank and share BGP with the
+ * river, so all ink is colour 3 on colour 0 and the white digits are the digits (26 tiles).  The
+ * low-fuel signal is E and F going out while the note sounds.
  */
 #include <gb/gb.h>
 #include <gb/cgb.h>
@@ -37,17 +40,36 @@ uint8_t hud_game;
 uint8_t hud_bridge;
 uint8_t hud_blink;
 
-#define HT_BLANK        0u
-#define HT_DIGIT        1u      /* 10 tiles: 1..10 */
-#define HT_BAR          11u     /* 9 tiles: bar with 0..8 px filled */
-#define HT_E            20u
-#define HT_F            21u
-#define HT_PLANE        22u
-#define HT_B            23u
-#define HT_HI_H         24u     /* idle: white HI and high score (ink in both planes = colour 3) */
-#define HT_HI_I         25u
-#define HT_WDIGIT       26u     /* 10 tiles: 26..35 */
+#ifdef PLATFORM_DUAL
+static uint8_t ht_base;             /* 0 on a GBC (bank 1), DMG_HUD_TILE_BASE on a DMG (bank 0) */
+#define HT_BASE         ht_base
+#elif defined(PLATFORM_DMG)
+#define HT_BASE         DMG_HUD_TILE_BASE
+#else
+#define HT_BASE         0u
+#endif
+#define HT_BLANK        (HT_BASE + 0u)
+#define HT_DIGIT        (HT_BASE + 1u)      /* 10 tiles: 1..10 */
+#define HT_BAR          (HT_BASE + 11u)     /* 9 tiles: bar with 0..8 px filled */
+#define HT_E            (HT_BASE + 20u)
+#define HT_F            (HT_BASE + 21u)
+#define HT_PLANE        (HT_BASE + 22u)
+#define HT_B            (HT_BASE + 23u)
+#define HT_HI_H         (HT_BASE + 24u)     /* idle: white HI and high score (ink in both planes = colour 3) */
+#define HT_HI_I         (HT_BASE + 25u)
+#ifdef PLATFORM_DMG
+#define HT_COUNT        26u
+typedef char hud_dmg_ids_fit[(DMG_HUD_TILE_BASE + HT_COUNT == DMG_SPRITE_SPILL &&
+                              TILE_RIVER_BASE + TILE_RIVER_COUNT == DMG_HUD_TILE_BASE) ? 1 : -1];
+#endif
+#ifdef PLATFORM_DUAL
+#define HT_WDIGIT       ((uint8_t)(gb_cgb ? (HT_BASE + 26u) : HT_DIGIT))   /* a DMG: the digits are white */
+#elif defined(PLATFORM_DMG)
+#define HT_WDIGIT       HT_DIGIT
+#else
+#define HT_WDIGIT       (HT_BASE + 26u)     /* 10 tiles: 26..35 */
 #define HT_COUNT        36u
+#endif
 
 #define HUD_COLS        20u
 #define HUD_CELLS       (HUD_COLS * 2u)
@@ -69,6 +91,7 @@ uint8_t hud_blink;
 #define HUD_F_COL       (HUD_BAR_COL + HUD_BAR_CELLS)
 #define HUD_MAX_PLANES  6u
 
+#ifdef GB_HAS_CGB
 static const palette_color_t hud_palette[4] = {
     RGB(0, 0, 0), RGB(10, 10, 10), RGB(31, 28, 6), RGB(31, 31, 31)
 };
@@ -86,6 +109,15 @@ static const palette_color_t hud_pal_bar[2][4] = {
     { RGB(0, 0, 0), RGB(10, 10, 10), RGB(22, 4, 4), RGB(22, 4, 4) }
 };
 static uint8_t hud_warn_shown;
+#endif
+/* What hud_want[] was last built from: it is a pure function of these, so a pass
+ * where none changed has nothing to do (20k units per call at the DMG clock). */
+static uint8_t hs_score[3];
+static uint8_t hs_lives;
+static uint8_t hs_bridge;
+static uint8_t hs_fuel;
+static uint8_t hs_warn;
+static uint8_t hs_attract = 1u;     /* attract, and the first call: always rebuild */
 
 static uint8_t hud_want[HUD_CELLS];
 static uint8_t hud_shown[HUD_CELLS];
@@ -103,7 +135,13 @@ static void hud_glyph_tile(uint8_t id, uint8_t glyph) {
     const uint8_t *src = atari_charset + (uint16_t)glyph * 8u;
 
     for (hu_i = 0; hu_i < 8u; hu_i++) {
+#ifdef PLATFORM_DUAL
+        hud_tile[hu_i * 2u] = gb_cgb ? 0u : src[hu_i];
+#elif defined(PLATFORM_DMG)
+        hud_tile[hu_i * 2u] = src[hu_i];
+#else
         hud_tile[hu_i * 2u] = 0u;
+#endif
         hud_tile[hu_i * 2u + 1u] = src[hu_i];
     }
     set_bkg_data(id, 1, hud_tile);
@@ -134,7 +172,13 @@ static void hud_bar_tile(uint8_t id, uint8_t px) {
             p0 = 0u;
             p1 = 0u;
         } else {
+#ifdef PLATFORM_DUAL
+            p0 = gb_cgb ? grey : 0xFFu; /* colour 1 where grey, colour 2 (GBC) or 3 (DMG) where filled */
+#elif defined(PLATFORM_DMG)
+            p0 = 0xFFu;                 /* colour 1 where grey, colour 3 where filled */
+#else
             p0 = grey;                  /* colour 1 where grey, colour 2 where filled */
+#endif
             p1 = filled;
         }
         hud_tile[row * 2u] = p0;
@@ -147,10 +191,17 @@ static void hud_bar_tile(uint8_t id, uint8_t px) {
 void hud_gbc_init(void) {
     uint8_t i;
 
-    set_bkg_palette(HUD_PAL_MAIN, 1, hud_palette);
-    hud_warn_shown = 0xFFu;             /* force the first palette write */
+#ifdef PLATFORM_DUAL
+    ht_base = gb_cgb ? 0u : DMG_HUD_TILE_BASE;
+#endif
+#ifdef GB_HAS_CGB
+    if (gb_cgb) {
+        set_bkg_palette(HUD_PAL_MAIN, 1, hud_palette);
+        hud_warn_shown = 0xFFu;         /* force the first palette write */
 
-    VBK_REG = 1;
+        VBK_REG = 1;
+    }
+#endif
     for (i = 0; i < 16u; i++) {
         hud_tile[i] = 0u;
     }
@@ -167,21 +218,25 @@ void hud_gbc_init(void) {
     hud_glyph_tile(HT_B, GLYPH_A + 1u);
     hud_white_tile(HT_HI_H, GLYPH_A + 7u);
     hud_white_tile(HT_HI_I, GLYPH_A + 8u);
-    for (i = 0; i < 10u; i++) {
-        hud_white_tile((uint8_t)(HT_WDIGIT + i), (uint8_t)(GLYPH_0 + i));
-    }
+#ifdef GB_HAS_CGB
+    if (gb_cgb) {
+        for (i = 0; i < 10u; i++) {
+            hud_white_tile((uint8_t)(HT_WDIGIT + i), (uint8_t)(GLYPH_0 + i));
+        }
 
-    /* Attribute bytes of the window map ($9C00): bank 1 tiles, palette 1. */
-    for (i = 0; i < HUD_COLS; i++) {
-        set_win_tile_xy(i, 0, (uint8_t)(HUD_ATTR | ((i >= HUD_BRIDGE_COL) ? HUD_PAL_TEXT : HUD_PAL_MAIN)));
-        set_win_tile_xy(i, 1, (uint8_t)(HUD_ATTR | HUD_PAL_MAIN));
+        /* Attribute bytes of the window map ($9C00): bank 1 tiles, palette 1. */
+        for (i = 0; i < HUD_COLS; i++) {
+            set_win_tile_xy(i, 0, (uint8_t)(HUD_ATTR | ((i >= HUD_BRIDGE_COL) ? HUD_PAL_TEXT : HUD_PAL_MAIN)));
+            set_win_tile_xy(i, 1, (uint8_t)(HUD_ATTR | HUD_PAL_MAIN));
+        }
+        set_win_tile_xy(HUD_E_COL, 1, (uint8_t)(HUD_ATTR | HUD_PAL_E));
+        for (i = 0; i < HUD_BAR_CELLS; i++) {
+            set_win_tile_xy((uint8_t)(HUD_BAR_COL + i), 1, (uint8_t)(HUD_ATTR | HUD_PAL_BAR));
+        }
+        set_win_tile_xy(HUD_F_COL, 1, (uint8_t)(HUD_ATTR | HUD_PAL_TEXT));
+        VBK_REG = 0;
     }
-    set_win_tile_xy(HUD_E_COL, 1, (uint8_t)(HUD_ATTR | HUD_PAL_E));
-    for (i = 0; i < HUD_BAR_CELLS; i++) {
-        set_win_tile_xy((uint8_t)(HUD_BAR_COL + i), 1, (uint8_t)(HUD_ATTR | HUD_PAL_BAR));
-    }
-    set_win_tile_xy(HUD_F_COL, 1, (uint8_t)(HUD_ATTR | HUD_PAL_TEXT));
-    VBK_REG = 0;
+#endif
 
     for (i = 0; i < HUD_CELLS; i++) {
         hud_want[i] = HT_BLANK;
@@ -218,6 +273,21 @@ static void hud_put_score(void) {
 void hud_update(void) BANKED {
     uint8_t cell;
 
+    if (player_state != PLAYER_STATE_ATTRACT && !hs_attract &&
+        hs_fuel == (uint8_t)(hud_fuel >> 2) && hs_score[2] == hud_score_bcd[2] &&
+        hs_score[1] == hud_score_bcd[1] && hs_score[0] == hud_score_bcd[0] &&
+        hs_lives == hud_lives && hs_bridge == hud_bridge && hs_warn == sound_warn_on) {
+        return;
+    }
+    hs_attract = (player_state == PLAYER_STATE_ATTRACT) ? 1u : 0u;
+    hs_fuel = (uint8_t)(hud_fuel >> 2);
+    hs_score[0] = hud_score_bcd[0];
+    hs_score[1] = hud_score_bcd[1];
+    hs_score[2] = hud_score_bcd[2];
+    hs_lives = hud_lives;
+    hs_bridge = hud_bridge;
+    hs_warn = sound_warn_on;
+
     if (player_state == PLAYER_STATE_ATTRACT) {
         hu_src = hud_hi_bcd;            /* idle: HI label and the high score, white */
         hu_base = HT_WDIGIT;
@@ -253,14 +323,26 @@ void hud_update(void) BANKED {
     hud_want[HUD_BRIDGE_COL + 1u] = (uint8_t)(HT_DIGIT + (hud_bridge / 10u) % 10u);
     hud_want[HUD_BRIDGE_COL + 2u] = (uint8_t)(HT_DIGIT + hud_bridge % 10u);
 
-    /* Colours follow the low-fuel note: red gauge while it sounds. */
-    cell = (sound_warn_on != 0u) ? 1u : 0u;
-    if (cell != hud_warn_shown) {
-        hud_warn_shown = cell;
-        set_bkg_palette(HUD_PAL_TEXT, 1, hud_pal_text[cell]);
-        set_bkg_palette(HUD_PAL_E, 1, hud_pal_e[cell]);
-        set_bkg_palette(HUD_PAL_BAR, 1, hud_pal_bar[cell]);
+#ifdef PLATFORM_DMG
+    if (!gb_cgb) {
+        if (sound_warn_on != 0u) {
+            hud_want[HUD_COLS + HUD_E_COL] = HT_BLANK;
+            hud_want[HUD_COLS + HUD_F_COL] = HT_BLANK;
+        }
     }
+#endif
+#ifdef GB_HAS_CGB
+    if (gb_cgb) {
+        /* Colours follow the low-fuel note: red gauge while it sounds. */
+        cell = (sound_warn_on != 0u) ? 1u : 0u;
+        if (cell != hud_warn_shown) {
+            hud_warn_shown = cell;
+            set_bkg_palette(HUD_PAL_TEXT, 1, hud_pal_text[cell]);
+            set_bkg_palette(HUD_PAL_E, 1, hud_pal_e[cell]);
+            set_bkg_palette(HUD_PAL_BAR, 1, hud_pal_bar[cell]);
+        }
+    }
+#endif
 
     for (hu_i = 0; hu_i < HUD_CELLS; hu_i++) {
         if (hud_want[hu_i] != hud_shown[hu_i]) {

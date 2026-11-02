@@ -7,10 +7,10 @@
  *
  * Build with .\build_gbc.ps1 -ProfExport so static functions have names.
  * Profiler units are 70,224 per frame at any CPU speed: M-cycles at double
- * speed = units / 2.  The headline number is passes (wait_vbl_done calls)
+ * speed = units / 2.  The headline number is passes (river_update calls)
  * per frame: 1.0 = 60 Hz, 0.5 = the main loop locked at 30 Hz.
  */
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
 import * as c from './gearboy_client.mjs';
 
 const mode = process.argv[2] || 'fast';
@@ -22,6 +22,13 @@ await c.init();
 await c.call('set_profiler', { action: 'start' });
 await c.call('debug_continue');
 await sleep(3000);                               /* boot: Start before this is ignored */
+/* GB_START_LEVEL=n: Up n times in the attract menu: start index 0..3 (2 = level 20, islands). */
+for (let i = 0; i < Number(process.env.GB_START_LEVEL || 0); i++) {
+    await c.call('controller_button', { action: 'press', button: 'up', player: 1 });
+    await sleep(200);
+    await c.call('controller_button', { action: 'release', button: 'up', player: 1 });
+    await sleep(200);
+}
 await c.call('controller_button', { action: 'press', button: 'start', player: 1 });
 await sleep(300);
 await c.call('controller_button', { action: 'release', button: 'start', player: 1 });
@@ -35,11 +42,20 @@ await sleep(2500);
 await c.call('set_profiler', { action: 'reset' });
 await sleep(10000);
 const d = JSON.parse(txt(await c.call('get_profiler_data', { count, sort: 'max' })));
+if (process.env.GB_PROF_JSON) writeFileSync(process.env.GB_PROF_JSON, JSON.stringify(d, null, 1));   /* full dump, every field */
 const rd = name => c.call('read_memory', { area: 6, offset: (parseInt(new RegExp(`DEF ${name} 0x([0-9A-Fa-f]+)`).exec(noi)[1], 16) - 0xC000)
     .toString(16).toUpperCase().padStart(4, '0'), size: 1 }).then(r => txt(r).replace(/\s+/g, ' '));
 console.log('river_clamps', await rd('_river_clamps'));
 console.log('river_owed_max', await rd('_river_owed_max'));
-const w = d.functions.find(f => f.name === '_wait_vbl_done');
+if (/DEF _pl_oam_n /.test(noi)) {
+    const rd16 = async n => { const o = JSON.parse(txt(await c.call('read_memory', { area: 6, offset: (parseInt(new RegExp(`DEF ${n} 0x([0-9A-Fa-f]+)`).exec(noi)[1], 16) - 0xC000).toString(16).toUpperCase().padStart(4, '0'), size: 2 }))); return parseInt(o.data.replace(/\s+/g, '').match(/../g).reverse().join(''), 16); };
+    console.log('oamcheck: passes', await rd16('_pl_oam_n'), 'errors', await rd16('_pl_oam_err'), 'draw errors', await rd16('_pl_oam_draw_err'), 'scan errors', await rd16('_pl_scan_err'));
+}
+if (/DEF _rchk_rows /.test(noi)) {
+    const rd16 = async n => { const o = JSON.parse(txt(await c.call('read_memory', { area: 6, offset: (parseInt(new RegExp(`DEF ${n} 0x([0-9A-Fa-f]+)`).exec(noi)[1], 16) - 0xC000).toString(16).toUpperCase().padStart(4, '0'), size: 2 }))); return parseInt(o.data.replace(/\s+/g, '').match(/../g).reverse().join(''), 16); };
+    console.log('rivercheck: rows', await rd16('_rchk_rows'), 'errors', await rd16('_rchk_err'));
+}
+const w = d.functions.find(f => f.name === '_river_update');   /* one per pass; vsync() is skipped after an overrun */
 console.log(`mode ${mode}: frames ${d.frames}, passes ${w ? w.calls : '?'}, passes/frame ${w ? (w.calls / d.frames).toFixed(2) : '?'}`);
 for (const f of d.functions) {
     console.log(f.name.padEnd(26), 'calls', String(f.calls).padStart(5), 'avg', String(f.average_cycles).padStart(7),

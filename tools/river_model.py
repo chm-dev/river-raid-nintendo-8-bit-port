@@ -19,11 +19,12 @@ Run `python tools/river_model.py` to print a short generated sample.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CART = ROOT / "assets" / "atari" / "river_raid_cart_a000_bfff.bin"
+CART = Path(os.environ.get("RIVER_CART") or ROOT / "assets" / "atari" / "river_raid_cart_a000_bfff.bin")
 ROM = CART.read_bytes()
 
 
@@ -31,9 +32,23 @@ def rom(a: int, n: int) -> bytes:
     return ROM[a - 0xA000 : a - 0xA000 + n]
 
 
+# $A89F is the operand of "cmp #$08" at $A89E.  The 2600 mod patches it to $EA, so the
+# "nib < threshold" test always passes and the direction logic below never runs.
+NIB_PASS = ROM[0x89F]
+# RIVER_2600=1 applies the mod's generator behaviour to the original cart's tables, so the
+# host check can compare the C build (-DRIVER_2600) without the mod's texture changes.
+# RIVER_BLOCKY=1 (implies RIVER_2600): the river edges sit on a GRID-pixel grid (RIVER_GRID, 4 or 8) and
+# the ramps move one GRID step every GRID rows, like the 2600 playfield.  tests/host_river.ps1 -Blocky.
+BLOCKY = bool(os.environ.get("RIVER_BLOCKY"))
+GRID = int(os.environ.get("RIVER_GRID") or 4)       # edge grid in pixels: 4 or 8
+MODE_2600 = bool(os.environ.get("RIVER_2600")) or BLOCKY
+if MODE_2600:
+    NIB_PASS = 0xEA
+# $A977 is the operand of "and #$20" at $A976 (feature spawn test); the mod makes it $27.
+FEATURE_MASK = ROM[0x977]
 BANK_MAIN = rom(0xB800, 16)
 BANK_ISLAND = rom(0xB810, 16)
-WALK_BA8F = rom(0xBA8F, 32)
+WALK_BA8F = bytes(32) if MODE_2600 else rom(0xBA8F, 32)
 DEFAULTS_BAE1 = rom(0xBAE1, 0x13)
 # The ROM tables are contiguous; the original can index past the nominal
 # 22/23 entries when min($5F,$2C) is large at level >= 10, so keep the bytes
@@ -225,7 +240,7 @@ class RiverState:
 
     def _feature_select(self) -> None:
         """$A96C-$A9D5."""
-        if (self.flags23 & 0x80) or self.rowcount != 0 or not (self.lfsr_c & 0x20):
+        if (self.flags23 & 0x80) or self.rowcount != 0 or not (self.lfsr_c & FEATURE_MASK):
             return
         if self.level & 1:
             x = self.lfsr_a & 0x07
@@ -313,6 +328,9 @@ class RiverState:
 
         # --- left bank and left-side feature ----------------------------- #
         x = self.left if island else _b(self.left + self.phase)
+        x_true = x
+        if BLOCKY and not island:
+            x &= ~(GRID - 1) & 0xFF
         y = (x >> 2) - 1
         if (not island) and (self.feature & 0x80) and (self.rowcount < self.be):
             ysave = y
@@ -325,6 +343,10 @@ class RiverState:
 
         # --- island / right bank ----------------------------------------- #
         a = self.width
+        if BLOCKY and not island:
+            # the right edge rounds up, the left one down: the drawn river contains the true one,
+            # so everything the spawner places in the true river stands on drawn water
+            a = _b(((x_true + self.width + GRID - 1) & ~(GRID - 1)) - x)
         if island:
             if self.phase < 6:
                 a = _b(self.width + self.phase + self.phase)
@@ -414,8 +436,17 @@ class RiverState:
             v = _s(self._v35)
             # A7FB: move only while the phase is still approaching the target.
             if (v > 0 and self.phase < self._target) or (v < 0 and self.phase > self._target):
-                self.phase = _b(self.phase + v)
-                self.width = _b(self.width - 2 * v)
+                if not BLOCKY:
+                    self.phase = _b(self.phase + v)
+                    self.width = _b(self.width - 2 * v)
+                elif self.rowcount % GRID == 0:
+                    # one GRID-pixel step per GRID rows, never past the target
+                    nv = self.phase + GRID * v
+                    if (v > 0 and nv > self._target) or (v < 0 and nv < self._target):
+                        nv = self._target
+                    d = nv - self.phase
+                    self.phase = _b(nv)
+                    self.width = _b(self.width - 2 * d)
             else:
                 self._v35 = 0
 
@@ -453,7 +484,7 @@ class RiverState:
                 if self.c3 == 0:
                     self.c3 = 0x01 if nib >= 8 else 0xFF
                     self._clamp_decision(nib)
-                elif nib < 8:
+                elif nib < NIB_PASS:
                     pass
                 elif nib == 0x0D:
                     self.c3 ^= 0xFE

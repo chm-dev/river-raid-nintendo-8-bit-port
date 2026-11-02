@@ -101,6 +101,11 @@ void entities_clear_near(uint8_t jet_y) BANKED;
 /* 1 while a new game's river scrolls in: entities stand still (see entities.c). */
 extern uint8_t ent_hold;
 extern uint8_t ent_paused;              /* pause menu: entities_update() does nothing */
+#ifdef PROF_OAMCHECK
+void ent_check_redraw(uint8_t top) BANKED;
+void ent_check_oam(uint8_t what) BANKED;
+#endif
+extern uint8_t ent_oam_used;            /* logic OAM slots 0..ent_oam_used-1 are in use (and the shot, 47) */
 extern uint16_t ent_scrolled;           /* rows scrolled since the game start, while held */
 #define ENT_WAIT_ROWS           222u    /* rows the start scroll-in lasts (measured: 219) */
 

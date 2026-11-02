@@ -12,4 +12,5 @@ extern volatile OAM_item_t shadow_OAM[64];
 void set_sprite_palette(uint8_t first, uint8_t n, const palette_color_t *p);
 void set_sprite_data(uint8_t first, uint8_t n, const uint8_t *d);
 #define S_FLIPX 0x40
+#define S_PAL(n) (n)
 #endif

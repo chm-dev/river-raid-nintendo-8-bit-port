@@ -15,6 +15,9 @@ extern const uint8_t ent_gfx_count[18];
 extern const uint8_t ent_gfx_rows[18];
 extern const uint8_t ent_gfx_cols[18];  /* width in 8-px tiles (SIZEP3) */
 extern const uint8_t ent_gfx_pal[18];
+#ifdef PLATFORM_DUAL
+extern const uint8_t ent_gfx_pal_dmg[18];   /* the dual ROM picks one of the two at boot */
+#endif
 /* Bridge explosion: tile index (0xFF = blank, not drawn) per frame 2..6, row, column. */
 extern const uint8_t ent_exp14_map[60];
 /* Sprite palettes 1 (bridge), 2 (helicopters) and 3 (ships); palette 0 is the jet's. */

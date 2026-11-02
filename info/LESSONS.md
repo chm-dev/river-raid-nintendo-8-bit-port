@@ -42,4 +42,4 @@ The river code must be time-based on `game_ticks`. Game logic runs at 30 Hz and 
 A frame budget missed by one pass costs a duplicate frame. Measure the late passes first (what they contain), then the per-frame and per-function views. Sampler weights are approximate: check a hot spot in more than one view before optimising it.
 
 ### Lesson 18 — prove an optimisation by diffing output
-Dump what the old and new builds produce and compare them byte for byte, not only with a test. Tests cover what someone thought to check; diffs cover the rest.
+Dump what the old and new builds produce and compare them byte for byte, not only with a test. Tests cover what someone thought to check; diffs cover the rest. The reference must be independent of the change: a C rewrite that copied the NES OAM byte order made every GBC enemy invisible, and the assembly written from it matched it perfectly (0 errors). Before a handover, also look at a screenshot.

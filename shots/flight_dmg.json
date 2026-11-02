@@ -1,0 +1,1 @@
+[{"wait":4000},{"shot":"shots/dmg_attract.png"},{"tap":"start"},{"wait":5000},{"poke":"_player_invuln","bytes":"01"},{"press":"up"},{"wait":2500},{"shot":"shots/dmg_flight.png"},{"peek":"_gb_cgb","n":1}]

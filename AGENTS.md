@@ -1,18 +1,20 @@
-# AGENTS.md — GBC port workspace rules
+# AGENTS.md — Game Boy port workspace rules
 
-Stable rules only. Status lives in `HANDOFF.md`; the roadmap is `GBC_PORT_PLAN.md`.
+Stable rules only. Status lives in `HANDOFF.md`.
 
 ## Project status
 - **Read `HANDOFF.md` first.** Short and current: where we are, next steps, decisions not to reopen, where to look.
-- **`GBC_PORT_PLAN.md` is the course of action:** decisions, measurements, technical design, milestones, risks, build and emulator notes.
+- **`PLAN_DMG.md` is the working plan:** the exact river on DMG (branch `dmg-exact`), tasks, tile budget, gates.
+- **`PLAN_2600.md` is the parked 2600 river mode** and holds the performance findings of Stage 1b. The decision text and risks are in `docs/PROPOSAL_2600_RIVER_MODE.md`.
+- **GBC history is in `archive/gbc/`** (old HANDOFF, PROGRESS, GBC_PORT_PLAN, BUGS&FEATS: architecture, baseline measurements, build and emulator notes). Open it only when needed.
 - **`PROGRESS.md` is append-only history.** Do not read it whole. Grep it for a keyword and read only the matching `### date - title` entry.
 - **NES history is in `archive/nes/`** (old HANDOFF, PROGRESS, PORTING_PLAN, BUGS&FEATS, Mesen notes, NES AGENTS and LESSONS). Open it only when a specific NES reference is needed. Nothing there is required reading.
 - Keep `HANDOFF.md` ~100 lines (up to ~150 when the extra text is clearly valuable). Trim before adding.
 
 ## Project overview
 Port of the Atari 8-bit **River Raid** (`xex/River Raid (1983)(Activision)(US)[a3].xex`) to the **Game Boy Color** in C, using GBDK-2020 v4.5.0 (`./gbdk`).
-- **GBC only.** DMG and Game Boy Pocket are not targets.
-- **Prototype first:** reuse the existing C code, add no new assembly, and decide on a playtest go/no-go after milestone 2.
+- **GBC is the finished target; DMG is an experiment** (`PLAN_DMG.md`, user, 2026-11-02). Keep the GBC ROMs working and DMG code behind its own flag.
+- **Prototype first:** reuse the existing C code and decide on a playtest go/no-go after milestone 2. Hand-written sm83 is allowed where it pays (user, 2026-11-02); keep the C version as the reference for a byte-for-byte check (`build_gbc.ps1 -OamCheck`, `-RiverCheck`).
 - **Atari ground truth:** `docs/ATARI_RE_SPEC.md`, `docs/atari_disasm_*.txt`, `assets/atari/extracted/`. The shared river generator is `tools/river_model.py` and `src/river.c`.
 - **Logic coordinates:** game logic stays in NES-era coordinates (X = Atari HPOS, Y = NES scanlines 30..239). Only drawing goes through a camera.
 - **HUD art:** do not redraw. `assets/atari/extracted/charset.bin` holds the original art; see `assets/atari/extracted/README.md` → "HUD glyph inventory".
@@ -30,7 +32,7 @@ Port of the Atari 8-bit **River Raid** (`xex/River Raid (1983)(Activision)(US)[a
 3. **SDCC local aliasing.** Do not keep a block-local value live across a call in a complex function. SDCC can alias it with the callee's state and the saved value silently changes. Use a file-scope `static` for values like a saved row offset. (This is the river-renderer `ysave` bug; the code comments cite this rule number.)
 4. **Inline `__asm` goes in its own function.** SDCC keeps values in registers across an asm block and corrupts the surrounding C. Raw-row tests can still pass, so verify with real tile pixels (`tests/compare_tile_rows.mjs`, `tests/host_river.ps1`).
 5. **Time-based river.** River code runs on `game_ticks`. Benchmarks must advance `sys_time` themselves: `entities_update()` reads it and it only advances with VBlank.
-6. **No river atlas.** Trees are template fragments; upload exact blocks.
+6. **No river atlas for the exact river.** Trees are template fragments; upload exact blocks. The 2600 river mode (`PLAN_2600.md`) is the only place a fixed edge atlas is allowed.
 7. **Banking.** Keep banked modules in a real bank. A single-bank link with `BANKED` functions jumped into unmapped ROM (`RST_38`).
 8. **Check the map after every link.** Each bank's code must stay inside its window (`$0000-$3FFF` bank 0, `$4000-$7FFF` for banked code). The linker may not fail on overflow, so treat `.map` as the source of truth until milestone 1 confirms the behaviour.
 9. **Profile peaks, not averages** (`LESSONS.md` item 14). Prove an optimisation by diffing output, not only with a test (`LESSONS.md` item 18).
@@ -44,7 +46,7 @@ Gearboy is the GB/GBC emulator with an MCP server. The folder is gitignored and 
 - **Profiler:** reports units of 70,224 per frame at any CPU speed. M-cycles = units / 4 in single speed, units / 2 in double speed (the ROM runs double). Recipe: `tests/gb/profile_play.mjs`.
 - **Speed:** fast-forward did not speed up headless runs, so keep benchmarks short.
 - **Shutdown:** stop the emulator process when finished.
-- **Client:** `tests/gb/gearboy_client.mjs`. Pacing tools: `tests/gb/profile_play.mjs` (profiler) and `tests/gb/pass_log.mjs` (per-pass scanline log); `tests/gb/run_emu.ps1` starts a fresh emulator for one of them (both need `.\build_gbc.ps1 -ProfExport`).
+- **Client:** `tests/gb/gearboy_client.mjs`. Pacing tools: `tests/gb/profile_play.mjs` (profiler) and `tests/gb/pass_log.mjs` (per-pass scanline log); `tests/gb/run_emu.ps1` starts a fresh emulator for one of them (both need `.\build_gbc.ps1 -ProfExport`; `pass_log` also `-PassLog`). `tests/gb/trace_prof.mjs` + `tools/trace_hist.py`: cycle-exact trace, per-phase and per-function cost (sees inside banked calls, which the profiler charges to `.call_hl`). `tests/gb/sprite_check.mjs`: hardware OAM against the entity positions; run it on the player ROM before a handover (it is the one automated check that does not compare assembly with its own C).
 - `tests/host_river.ps1` checks the C generator against `tools/river_model.py` on the host (needs `zig cc`). Run it after touching `river.c` generator code.
 
 ## Atari reverse engineering (dynamic analysis)
@@ -55,6 +57,6 @@ Gearboy is the GB/GBC emulator with an MCP server. The folder is gitignored and 
 ## Workflow
 - **The user runs the playtests.** Build the ROM, then hand over a checklist. Do not drive the emulator to confirm gameplay fixes.
 - **Bugs and features:** `BUGS&FEATS.md`. Mark a fix `[~]` until the user confirms it in play, then `[x]`.
-- **Branches:** work on `main`. Branch only for risky or throwaway experiments, never a scratch copy of the tree.
+- **Branches:** work on `main`. Branch only for risky or throwaway experiments, never a scratch copy of the tree. The 2600 river mode and the Stage 1b performance work are on `river-2600`, kept as the fallback; the DMG experiment is on `dmg-exact`. Merging either to `main` is the user's call.
 - **Never push.** Commit locally and stop; the user pushes to origin themselves. Do not run `git push`.
 - **Session end:** the steps are at the bottom of `HANDOFF.md`. Do not edit `AGENTS.md` for status.

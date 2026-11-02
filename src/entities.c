@@ -74,13 +74,34 @@ static uint8_t ent_anim;
 static uint8_t msl_x;
 static uint8_t msl_y;
 static uint8_t msl_dx;
+#ifdef __SDCC_sm83
+/* A fast helicopter may exist (set by the spawner, cleared by the search in
+ * ent_missile_tick): most of the game has none, and the search costs ~1.5k units
+ * per tick at the DMG clock. */
+static uint8_t msl_heli;
+/* Only the view's lines reach the hardware OAM (gbc/main.c), so a sprite row above
+ * them need not be written.  A row skipped here at y < 96 is at most at y = 101
+ * after the one entities_follow() (RIVER_MAX_OWED = 6) before the next redraw:
+ * its bottom line 108 is still above the view (112). */
+#define ENT_DRAW_TOP_VIEW       96u
+typedef char ent_draw_top_assert[(ENT_DRAW_TOP_VIEW - 1u + 6u + 8u <= GBC_VIEW_TOP_SCANLINE) ? 1 : -1];
+#ifdef PROF_OAMCHECK
+static uint8_t ent_draw_top = ENT_DRAW_TOP_VIEW;    /* ent_check_redraw() also draws with the old limit */
+#define ENT_DRAW_TOP            ent_draw_top
+#else
+#define ENT_DRAW_TOP            ENT_DRAW_TOP_VIEW
+#endif
+#else
+#define msl_heli                1u
+#define ENT_DRAW_TOP            HUD_SPLIT_SCANLINE
+#endif
 static const uint8_t msl_tile[16] = { 0xF0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 
 /* Non-zero from the start of a game until the player first moves or fires: the river\n * scrolls in but the world (patrols, tanks, shells, wake-ups) stands still. */
 uint8_t ent_hold;
 uint8_t ent_paused;
 uint16_t ent_scrolled;                  /* rows scrolled since the game start (while held) */
-static uint8_t ent_oam_used;
+uint8_t ent_oam_used;
 
 /* File-scope scratch (SDCC aliases block locals across calls). */
 static uint8_t e_i;
@@ -103,6 +124,17 @@ static volatile OAM_item_t *e_o;
 static uint8_t e_oam;
 static uint8_t e_px;
 static uint8_t e_n;
+#ifdef PROF_OAMCHECK
+uint16_t pl_scan_err;
+#endif
+
+#ifdef PLATFORM_DUAL
+/* The sprite palette numbers per object: the GBC table, or the DMG one (entities_init_graphics). */
+static uint8_t ent_pal_run[18];
+#define ENT_GFX_PAL         ent_pal_run
+#else
+#define ENT_GFX_PAL         ent_gfx_pal
+#endif
 
 static uint8_t ent_random(void) {
     ent_rng ^= (uint8_t)(ent_rng << 7);
@@ -112,7 +144,12 @@ static uint8_t ent_random(void) {
 }
 
 /* The land palettes' water entry (all three: dark land, bright land, road). */
-#ifdef __SDCC_sm83
+#if defined(__SDCC_sm83) && defined(PLATFORM_DMG) && !defined(PLATFORM_DUAL)
+/* One BGP: the whole river's water changes shade, as it does on the Atari. */
+static void ent_water_color(uint8_t flash) {
+    BGP_REG = flash ? DMG_BGP_FLASH : DMG_BGP;
+}
+#elif defined(__SDCC_sm83)
 /* GBC: the river uses BG palette 0 only (gbc/main.c bkg_palette); water is
  * colour 3.  The NES palette macro above is a no-op here, so write the whole
  * palette.  c is 0 for normal water, nonzero for the flash colour. */
@@ -125,6 +162,12 @@ static uint8_t ent_flash_cur;
 static palette_color_t ent_flash_pal[3][4];
 static uint8_t ent_flash_k;
 static void ent_water_color(uint8_t flash) {
+#ifdef PLATFORM_DUAL
+    if (!gb_cgb) {                      /* one BGP: the whole river's water changes shade */
+        BGP_REG = flash ? DMG_BGP_FLASH : DMG_BGP;
+        return;
+    }
+#endif
     if (flash == ent_flash_cur) {
         return;
     }
@@ -204,7 +247,50 @@ void entities_init_graphics(void) BANKED {
         pal[3] = ent_gfx_palette[e_i][2];
         set_sprite_palette((uint8_t)(e_i + 1u), 1, pal);
     }
+#if defined(__SDCC_sm83) && defined(PLATFORM_DMG)
+#ifdef PLATFORM_DUAL
+    if (gb_cgb) {                       /* bank 1, the art as it is */
+        set_sprite_data(ENT_TILE_BASE, ENT_GFX_TILES, ent_gfx_chr);
+        for (e_i = 0; e_i < 18u; e_i++) {
+            ent_pal_run[e_i] = ent_gfx_pal[e_i];
+        }
+#ifdef PROF_NEG_PAL                 /* negative control for tests/gb/gbc_check.mjs */
+        ent_pal_run[8] ^= 1u;
+#endif
+    } else {
+        for (e_i = 0; e_i < 18u; e_i++) {
+            ent_pal_run[e_i] = ent_gfx_pal_dmg[e_i];
+        }
+#endif
+    /* Two sprite palettes: some objects need other colour indexes than on the GBC.  Their colour
+     * 2 is light grey now, for FUEL (user, 2026-11-02).  Enemy jets stay dark: 2 -> 3, explosion
+     * included.  The balloon, on OBP1: light grey body, dark grey stripe and basket: 1 -> 2,
+     * 2 -> 3.  Runs before the tiles are shared; river_tile_pat is free at boot. */
+    for (e_t = 0; e_t < ENT_GFX_TILES; e_t++) {
+        for (e_n = 0; e_n < 16u; e_n += 2u) {
+            e_l = ent_gfx_chr[(uint16_t)e_t * 16u + e_n];
+            e_r = ent_gfx_chr[(uint16_t)e_t * 16u + e_n + 1u];
+            if (e_t >= ent_gfx_first[ENT_AUX_BALLOON] &&
+                e_t < (uint8_t)(ent_gfx_first[ENT_AUX_BALLOON] + ent_gfx_count[ENT_AUX_BALLOON])) {
+                river_tile_pat[e_n] = e_r;
+                river_tile_pat[e_n + 1u] = (uint8_t)(e_l | e_r);
+            } else if (e_t == ent_gfx_first[7] ||
+                       (e_t >= ent_exp_first[7] && e_t < (uint8_t)(ent_exp_first[7] + 5u))) {
+                river_tile_pat[e_n] = (uint8_t)(e_l | e_r);
+                river_tile_pat[e_n + 1u] = e_r;
+            } else {
+                river_tile_pat[e_n] = e_l;
+                river_tile_pat[e_n + 1u] = e_r;
+            }
+        }
+        set_sprite_data((uint8_t)(ENT_TILE_BASE + e_t), 1, river_tile_pat);
+    }
+#ifdef PLATFORM_DUAL
+    }
+#endif
+#else
     set_sprite_data(ENT_TILE_BASE, ENT_GFX_TILES, ent_gfx_chr);
+#endif
     set_sprite_data(MISSILE_TILE, 1, msl_tile);
 }
 
@@ -764,6 +850,9 @@ void entities_row(void) BANKED {
         }
         if (e_i == MAX_ENTITIES) {
             sp_y = 10u;
+#ifdef __SDCC_sm83
+            msl_heli = 1u;
+#endif
         }
     }
 
@@ -885,25 +974,116 @@ uint8_t entities_hit_shot(uint8_t sx, uint8_t sy) BANKED {
  * every ent_y[e_i] access into a ~30-cycle pointer setup, which made the C
  * version ~4k cycles per call (2.0k/frame in the profile).  Its own function,
  * as inline asm must be. */
+#ifdef __SDCC_sm83
+typedef char ent_scan_asm_consts[(MAX_ENTITIES == 11u && ENT_AUX_JET == 7u && ENT_AUX_FUEL == 15u &&
+                                  ENT_AUX_SHELL == 17u && SHELL_FLY_FRAMES == 0x11u) ? 1 : -1];
+
+/* C = slot, DE = type as an index. */
+static void ent_scan_asm(void) {
+    __asm
+        ld      a, (_e_i)
+        ld      c, a
+        ld      b, #0
+    1$:
+        ld      a, c
+        cp      a, #11
+        jr      NC, 9$
+        ld      hl, #_ent_type
+        add     hl, bc
+        ld      a, (hl)
+        cp      a, #7
+        jr      C, 7$
+        cp      a, #16
+        jr      NC, 6$
+        ld      e, a
+        ld      d, #0
+        ld      hl, #_ent_y
+        add     hl, bc
+        ld      a, (hl)
+        ld      hl, #_e_y
+        sub     a, (hl)             ; ent - jet
+        cp      a, #14
+        jr      C, 4$
+        cpl
+        inc     a                   ; jet - ent
+        ld      hl, #_ent_gfx_rows
+        add     hl, de
+        cp      a, (hl)
+        jr      NC, 7$
+    4$:
+        ld      hl, #_ent_x
+        add     hl, bc
+        ld      a, (hl)
+        ld      hl, #_e_px
+        sub     a, (hl)             ; ent - jet
+        cp      a, #8
+        jr      C, 8$
+        cpl
+        inc     a                   ; jet - ent
+        ld      d, a
+        ld      a, e
+        ld      hl, #_ent_gfx_cols
+        add     a, l
+        ld      l, a
+        adc     a, h
+        sub     a, l
+        ld      h, a
+        ld      a, (hl)
+        add     a, a
+        add     a, a
+        add     a, a                ; width
+        cp      a, d
+        jr      Z, 7$
+        jr      NC, 8$
+        jr      7$
+    6$:
+        cp      a, #17
+        jr      NZ, 7$
+        ld      hl, #_ent_aux
+        add     hl, bc
+        ld      a, (hl)
+        cp      a, #0x11
+        jr      NC, 8$
+    7$:
+        inc     c
+        jr      1$
+    9$:
+        ld      c, #0xFF
+    8$:
+        ld      a, c
+        ld      (_e_i), a
+    __endasm;
+}
+#endif
+
+#if defined(__SDCC_sm83) && !defined(PROF_OAMCHECK)
+#define ent_scan_player ent_scan_asm
+#else
 static void ent_scan_player(void) {
 #ifndef __SDCC_mos6502
-    for (; e_i < MAX_ENTITIES; e_i++) {
-        e_type = ent_type[e_i];
-        if (e_type == ENT_AUX_SHELL) {
-            if (ent_aux[e_i] >= SHELL_FLY_FRAMES) {
+    /* Pointers, not ent_y[e_i]: no calls in this loop, and each indexed access costs
+     * ~14 M-cycles on the sm83.  The GBC uses ent_scan_asm; -OamCheck compares them. */
+    const uint8_t *tp = &ent_type[e_i];
+    const uint8_t *yp = &ent_y[e_i];
+    uint8_t t, v;
+
+    for (; e_i < MAX_ENTITIES; e_i++, tp++, yp++) {
+        t = *tp;
+        if (t < ENT_AUX_JET) {
+            continue;
+        }
+        if (t > ENT_AUX_FUEL) {
+            if (t == ENT_AUX_SHELL && ent_aux[e_i] >= SHELL_FLY_FRAMES) {
                 return;
             }
             continue;
         }
-        if (e_type < ENT_AUX_JET || e_type > ENT_AUX_FUEL) {
+        v = *yp;
+        if ((uint8_t)(v - e_y) >= 14u && (uint8_t)(e_y - v) >= ent_gfx_rows[t]) {
             continue;
         }
-        if ((uint8_t)(ent_y[e_i] - e_y) >= 14u &&
-            (uint8_t)(e_y - ent_y[e_i]) >= ent_gfx_rows[e_type]) {
-            continue;
-        }
-        if ((uint8_t)(ent_x[e_i] - e_px) >= 8u &&
-            (uint8_t)(e_px - ent_x[e_i]) >= ent_width(e_type)) {
+        v = ent_x[e_i];
+        if ((uint8_t)(v - e_px) >= 8u && (uint8_t)(e_px - v) >= ent_width(t)) {
             continue;
         }
         return;
@@ -964,6 +1144,7 @@ static void ent_scan_player(void) {
     __endasm;
 #endif
 }
+#endif
 
 uint8_t entities_check_player(uint8_t px, uint8_t py) BANKED {
     e_px = px;
@@ -978,7 +1159,18 @@ uint8_t entities_check_player(uint8_t px, uint8_t py) BANKED {
     }
     e_i = 0;
     for (;;) {
+#ifdef PROF_OAMCHECK
+        e_t = e_i;
         ent_scan_player();
+        e_n = e_i;
+        e_i = e_t;
+        ent_scan_asm();
+        if (e_i != e_n) {
+            pl_scan_err++;
+        }
+#else
+        ent_scan_player();
+#endif
         if (e_i == 0xFFu) {
             return ENT_HIT_NONE;
         }
@@ -1142,6 +1334,9 @@ static void ent_missile_tick(void) {
     }
     if (e_t == MAX_ENTITIES) {
         msl_dx = 0;
+#ifdef __SDCC_sm83
+        msl_heli = 0;
+#endif
         return;
     }
     if (msl_dx) {
@@ -1241,14 +1436,71 @@ static uint8_t e_dx;
 /* Write e_cols consecutive sprites (one 8-pixel row of an entity) at OAM byte
  * offset e_off, stopping at the entity sprite budget.  Hand-written: the C
  * version took ~190 cycles per sprite, this ~45. */
+#ifdef __SDCC_sm83
+/* HL = OAM entry, B = columns left, C = byte offset, D = x, E = tile. */
+static void ent_emit_asm(void) {
+    __asm
+        ld      a, (_e_cols)
+        or      a, a
+        ret     Z
+        ld      b, a
+        ld      a, (_e_off)
+        ld      c, a
+        ld      e, a
+        ld      d, #0
+        ld      hl, #_gbc_logic_oam
+        add     hl, de
+        ld      a, (_e_px)
+        ld      d, a
+        ld      a, (_e_tile)
+        ld      e, a
+    1$:
+        ld      a, c
+        cp      a, #176
+        jr      NC, 2$
+        ld      a, (_e_y)           ; GB order: y, x, tile, prop
+        ld      (hl+), a
+        ld      a, d
+        ld      (hl+), a
+        ld      a, e
+        ld      (hl+), a
+        inc     e
+        ld      a, (_e_prop)
+        ld      (hl+), a
+        ld      a, (_e_dx)
+        add     a, d
+        ld      d, a
+        ld      a, c
+        add     a, #4
+        ld      c, a
+        dec     b
+        jr      NZ, 1$
+    2$:
+        ld      a, c
+        ld      (_e_off), a
+        ld      a, d
+        ld      (_e_px), a
+        ld      a, e
+        ld      (_e_tile), a
+    __endasm;
+}
+#endif
+
+#if defined(__SDCC_sm83) && !defined(PROF_OAMCHECK)
+#define ent_emit_row ent_emit_asm
+#else
 static void ent_emit_row(void) {
 #ifndef __SDCC_mos6502
-    /* Host build (tests/host/spawn_main.c): same thing in C. */
-    for (e_n = e_cols; e_n != 0u && e_off < 176u; e_n--, e_off = (uint8_t)(e_off + 4u)) {
-        shadow_OAM[e_off >> 2].y = e_y;
-        shadow_OAM[e_off >> 2].tile = e_tile++;
-        shadow_OAM[e_off >> 2].prop = e_prop;
-        shadow_OAM[e_off >> 2].x = e_px;
+    /* GBC and host build (tests/host/spawn_main.c): same thing in C. */
+    /* Named fields: the byte order differs between the NES and the GB, and this is the
+     * reference the assembly is compared with. */
+    volatile OAM_item_t *d = (volatile OAM_item_t *)((volatile uint8_t *)shadow_OAM + e_off);
+
+    for (e_n = e_cols; e_n != 0u && e_off < 176u; e_n--, e_off = (uint8_t)(e_off + 4u), d++) {
+        d->y = e_y;
+        d->tile = e_tile++;
+        d->prop = e_prop;
+        d->x = e_px;
         e_px = (uint8_t)(e_px + e_dx);
     }
 #else
@@ -1281,13 +1533,14 @@ static void ent_emit_row(void) {
     __endasm;
 #endif
 }
+#endif
 /* Bridge debris: frame (e_type - 2) of ent_exp14_map, 3 tile rows x 4 columns;
  * blank tiles are not drawn. */
 static void ent_draw_bridge_debris(void) {
     e_c = (uint8_t)((e_type - ENT_AUX_EXPLODE_FIRST) * 12u);
     e_y = ent_y[e_i];
     for (e_t = 0; e_t < 3u; e_t++, e_y = (uint8_t)(e_y + 8u)) {
-        if (e_y < HUD_SPLIT_SCANLINE || e_y >= ENT_CULL_Y) {
+        if (e_y < ENT_DRAW_TOP || e_y >= ENT_CULL_Y) {
             continue;
         }
         for (e_cols = 0; e_cols < 4u; e_cols++) {
@@ -1444,7 +1697,190 @@ static void ent_draw_reg(void) {
 }
 #endif
 
+#ifdef __SDCC_sm83
+typedef char ent_draw_asm_consts[(ENT_TILE_BASE == 88u && S_FLIPX == 0x20u && ENT_DRAW_TOP_VIEW == 96u &&
+                                  ENT_CULL_Y == 240u && ENT_AUX_BALLOON == 12u && ENT_AUX_FUEL == 15u &&
+                                  ENT_F_LEFT == 1u) ? 1 : -1];
+#ifdef PROF_OAMCHECK
+static uint8_t ent_draw_ref;    /* ent_check_redraw(): every type through the C path */
+#endif
+
+/* ent_draw() for an ordinary object (types 7..15), as ent_draw_reg does on the NES: the C setup
+ * below was ~300 M-cycles per entity.  DE = slot, BC = type, both as indexes. */
+static void ent_draw_asm(void) {
+    __asm
+        ld      a, (_e_i)
+        ld      e, a
+        ld      d, #0
+        ld      hl, #_ent_type
+        add     hl, de
+        ld      a, (hl)
+        ld      (_e_type), a
+        ld      c, a
+        ld      b, #0
+        ld      hl, #_ent_gfx_first
+        add     hl, bc
+        ld      a, (hl)
+        add     a, #88              ; ENT_TILE_BASE
+        ld      (_e_tile), a
+        ld      hl, #_ent_gfx_cols
+        add     hl, bc
+        ld      a, (hl)
+        ld      (_e_cols), a
+#ifdef PLATFORM_DUAL
+        ld      hl, #_ent_pal_run
+#else
+        ld      hl, #_ent_gfx_pal
+#endif
+        add     hl, bc
+        ld      a, (hl)
+        ld      (_e_prop), a
+        ld      hl, #_ent_gfx_rows
+        add     hl, bc
+        ld      a, (hl)
+        ld      (_e_rows), a
+        ld      hl, #_ent_y
+        add     hl, de
+        ld      a, (hl)
+        ld      b, a
+        ld      a, c
+        cp      a, #12              ; balloon: its tiles are padded 4 rows at the top
+        ld      a, b
+        jr      NZ, 1$
+        sub     a, #4
+    1$:
+        ld      (_e_y), a
+        ld      hl, #_ent_x
+        add     hl, de
+        ld      a, (hl)
+        ld      (_e_ex), a
+        ld      b, a
+        ld      a, #8
+        ld      (_e_dx), a
+        ld      hl, #_ent_flags
+        add     hl, de
+        bit     0, (hl)             ; ENT_F_LEFT
+        jr      Z, 2$
+        ld      a, c
+        cp      a, #15              ; fuel depots never flip
+        jr      Z, 2$
+        ld      hl, #_e_prop        ; mirror: flip every tile, walk the columns from the right
+        set     5, (hl)             ; S_FLIPX
+        ld      a, (_e_cols)
+        dec     a
+        add     a, a
+        add     a, a
+        add     a, a
+        add     a, b
+        ld      (_e_ex), a
+        ld      a, #0xF8
+        ld      (_e_dx), a
+    2$:
+        ld      a, (_e_oam)
+        add     a, a
+        add     a, a
+        ld      (_e_off), a
+        xor     a, a
+        ld      (_e_t), a
+    3$:                             ; one 8-pixel tile row per pass
+        ld      a, (_e_type)
+        cp      a, #12
+        jr      NZ, 4$
+        ld      a, (_e_t)
+        add     a, #8
+        ld      hl, #_e_rows
+        cp      a, (hl)
+        jr      C, 4$
+        ld      a, (_e_y)           ; only rows that are drawn: as in C, clipped rows skip this
+        cp      a, #96
+        jr      C, 4$
+        cp      a, #240
+        jr      NC, 4$
+        ld      a, (_e_off)
+        cp      a, #176
+        jr      NC, 4$
+        ld      a, (_e_prop)        ; the last tile row is the brown basket: sprite palette 1
+        and     a, #0xFC
+        or      a, #1
+        ld      (_e_prop), a
+    4$:
+        ld      a, (_e_y)
+        cp      a, #96              ; ENT_DRAW_TOP
+        jr      C, 5$
+        cp      a, #240             ; ENT_CULL_Y
+        jr      NC, 5$
+        ld      a, (_e_off)
+        cp      a, #176
+        jr      NC, 5$
+        ld      a, (_e_ex)
+        ld      (_e_px), a
+        call    _ent_emit_asm
+        jr      6$
+    5$:                             ; clipped row: skip its tiles
+        ld      a, (_e_cols)
+        ld      hl, #_e_tile
+        add     a, (hl)
+        ld      (hl), a
+    6$:
+        ld      hl, #_e_y
+        ld      a, (hl)
+        add     a, #8
+        ld      (hl), a
+        ld      a, (_e_t)
+        add     a, #8
+        ld      (_e_t), a
+        ld      hl, #_e_rows
+        cp      a, (hl)
+        jr      C, 3$
+        ld      a, (_e_off)
+        rrca
+        rrca
+        and     a, #0x3F
+        ld      (_e_oam), a
+    __endasm;
+}
+
+/* Entity sprites follow the river: HL = OAM y, B = slots, C = rows, DE = 4. */
+static void ent_follow_asm(void) {
+    __asm
+        ld      a, (_ent_oam_used)
+        sub     a, #2               ; ENT_OAM_TANK
+        ret     Z
+        ret     C
+        ld      b, a
+        ld      a, (_river_rows_last)
+        ld      c, a
+        ld      hl, #(_gbc_logic_oam + 8)
+        ld      de, #4
+    1$:
+        ld      a, (hl)
+        cp      a, #240             ; ENT_CULL_Y
+        jr      NC, 2$
+        add     a, c
+        ld      (hl), a
+    2$:
+        add     hl, de
+        dec     b
+        jr      NZ, 1$
+    __endasm;
+}
+#endif
+
 static void ent_draw(void) {
+#ifdef __SDCC_sm83
+    /* Wholly above ENT_DRAW_TOP (24 rows at most, y >= 250 wraps to below 6). */
+    if ((uint8_t)(ent_y[e_i] + 6u) < (uint8_t)(ENT_DRAW_TOP + 6u - 24u)) {
+        return;
+    }
+#ifdef PROF_OAMCHECK
+    if (!ent_draw_ref && ent_type[e_i] > ENT_AUX_EXPLODE_LAST && ent_type[e_i] < ENT_AUX_TANK) {
+#else
+    if (ent_type[e_i] > ENT_AUX_EXPLODE_LAST && ent_type[e_i] < ENT_AUX_TANK) {
+#endif
+        ent_draw_asm();
+        return;
+    }
+#endif
     e_type = ent_type[e_i];
 #ifdef __SDCC_mos6502
     if (e_type > ENT_AUX_EXPLODE_LAST && e_type < ENT_AUX_TANK) {
@@ -1478,7 +1914,7 @@ static void ent_draw(void) {
                   e_type < ENT_AUX_TANK) ? S_FLIPX : 0u;
     }
     e_cols = ent_gfx_cols[e_src];
-    e_prop = (uint8_t)(ent_gfx_pal[e_src] | e_flip);
+    e_prop = (uint8_t)(ENT_GFX_PAL[e_src] | e_flip);
     e_rows = ent_gfx_rows[e_src];
     e_y = ent_y[e_i];
     if (e_type == ENT_AUX_BALLOON) {
@@ -1497,7 +1933,7 @@ static void ent_draw(void) {
         e_off = (uint8_t)(e_oam << 2);
     }
     for (e_t = 0; e_t < e_rows; e_t += 8u, e_y = (uint8_t)(e_y + 8u)) {
-        if (e_y < HUD_SPLIT_SCANLINE || e_y >= ENT_CULL_Y || e_off >= 176u) {
+        if (e_y < ENT_DRAW_TOP || e_y >= ENT_CULL_Y || e_off >= 176u) {
             e_tile = (uint8_t)(e_tile + e_cols);
             continue;
         }
@@ -1523,12 +1959,19 @@ void entities_follow(void) BANKED {
     if (river_rows_last == 0u) {
         return;
     }
-#ifndef __SDCC_mos6502
-    for (e_t = ENT_OAM_TANK; e_t < ent_oam_used; e_t++) {
-        if (shadow_OAM[e_t].y >= ENT_CULL_Y) {
-            continue;
+#ifdef __SDCC_sm83
+    ent_follow_asm();
+#elif !defined(__SDCC_mos6502)
+    {
+        volatile uint8_t *y = (volatile uint8_t *)&shadow_OAM[ENT_OAM_TANK];
+        uint8_t v;
+
+        for (e_t = ENT_OAM_TANK; e_t < ent_oam_used; e_t++, y += 4u) {
+            v = *y;
+            if (v < ENT_CULL_Y) {
+                *y = (uint8_t)(v + river_rows_last);
+            }
         }
-        shadow_OAM[e_t].y = (uint8_t)(shadow_OAM[e_t].y + river_rows_last);
     }
 #else
     e_off = (uint8_t)(ent_oam_used << 2);
@@ -1553,6 +1996,29 @@ void entities_follow(void) BANKED {
     __endasm;
 #endif
 }
+
+#ifdef PROF_OAMCHECK
+/* Redraw every entity with the given top limit, for the byte-for-byte check in gbc/main.c. */
+void ent_check_redraw(uint8_t top) BANKED {
+    ent_draw_top = top;
+    ent_draw_ref = 1u;
+    e_oam = ENT_OAM_FIRST;
+    for (e_t = ENT_OAM_TANK; e_t < ENT_OAM_MISSILE; e_t++) {
+        shadow_OAM[e_t].y = 240u;
+    }
+    for (e_i = 0; e_i < MAX_ENTITIES; e_i++) {
+        if (ent_type[e_i] != ENTITY_NONE && !(ent_type[e_i] == ENT_AUX_TANK && (ent_flags[e_i] & ENT_F_WAIT))) {
+            ent_draw();
+        }
+    }
+    while (ent_oam_used > e_oam) {
+        ent_oam_used--;
+        shadow_OAM[ent_oam_used].y = 240u;
+    }
+    ent_oam_used = e_oam;
+    ent_draw_ref = 0u;
+}
+#endif
 
 void entities_update(void) BANKED {
     /* This group runs on its own frame (main.c staggers it against the
@@ -1626,7 +2092,7 @@ void entities_update(void) BANKED {
             msl_dx = 0;
         }
     }
-    if (!river_freeze && !ent_hold) {
+    if (msl_heli && !river_freeze && !ent_hold) {
         for (e_n = 0; e_n < game_ticks; e_n++) {
             ent_missile_tick();
         }
@@ -1646,13 +2112,13 @@ void entities_update(void) BANKED {
         if (e_type == ENT_AUX_TANK && (ent_flags[e_i] & ENT_F_WAIT)) {
             continue;                       /* no position until the bar is placed */
         }
-        ent_y[e_i] = (uint8_t)(ent_y[e_i] + river_scrolled);    /* the shell too ($AB7E: inc $40) */
-        if (ent_y[e_i] >= ENT_CULL_Y && ent_y[e_i] < 250u) {
+        e_y = (uint8_t)(ent_y[e_i] + river_scrolled);           /* the shell too ($AB7E: inc $40) */
+        ent_y[e_i] = e_y;
+        if (e_y >= ENT_CULL_Y && e_y < 250u) {
             ent_type[e_i] = ENTITY_NONE;
             entity_count--;
             continue;
         }
-        e_type = ent_type[e_i];
         if (e_type >= ENT_AUX_TANK) {
             if (!river_freeze && !ent_hold) {
                 for (e_n = 0; e_n < game_ticks; e_n++) {
@@ -1711,3 +2177,28 @@ void entities_update(void) BANKED {
     }
     ent_oam_used = e_oam;
 }
+
+#ifdef PROF_OAMCHECK
+extern uint8_t *oam_back;       /* gbc/main.c: the hardware OAM page this pass filled */
+uint8_t pl_oam_a[160];
+uint16_t pl_oam_n, pl_oam_err, pl_oam_draw_err;
+
+/* what = 0: keep this pass's hardware OAM; 1 / 2: compare with it, count in the error counter. */
+void ent_check_oam(uint8_t what) BANKED {
+    for (e_t = 0; e_t < 160u; e_t++) {
+        if (what == 0u) {
+            pl_oam_a[e_t] = oam_back[e_t];
+        } else if (pl_oam_a[e_t] != oam_back[e_t]) {
+            if (what == 1u) {
+                pl_oam_err++;
+            } else {
+                pl_oam_draw_err++;
+            }
+            break;
+        }
+    }
+    if (what == 1u) {
+        pl_oam_n++;
+    }
+}
+#endif

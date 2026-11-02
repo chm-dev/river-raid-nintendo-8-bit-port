@@ -13,3 +13,4 @@ roms/
 tools/__pycache__
 __pycache__/*.pyc
 gearboy/
+shots/

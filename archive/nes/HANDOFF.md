@@ -6,6 +6,8 @@ and read only the matching `### date - title` entry. `AGENTS.md` has the toolcha
 
 **Last updated:** 2026-10-31 · **Branch:** `main` · **Phase:** 6 (title/menu/sound/HUD polish) in progress
 
+**Added 2026-11-02, for after the `dmg-exact` merge:** ideas for steadier NES pacing from the GB work, none started: measure late frames first, then idle-time row generation, then the HUD split wait. Details: `BUGS&FEATS.md` in this folder, top of FEATURES.
+
 ## Where we are
 
 Phases 1-5 are done (reverse engineering, build, HUD/split scroll, river generator and exact tile cache,

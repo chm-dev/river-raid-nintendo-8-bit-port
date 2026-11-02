@@ -1,76 +1,75 @@
 # HANDOFF — read this first
 
-Short, current, rewritten every session. Rules are in `AGENTS.md`; the plan is `GBC_PORT_PLAN.md`; history is `PROGRESS.md` (grep it, do not read whole).
+Short, current, rewritten every session. Rules are in `AGENTS.md`; **the plan is `PLAN_DMG.md`**; history is `PROGRESS.md` (grep it, do not read whole).
 
-**Last updated:** 2026-11-01 · **Branch:** `main` (gbc-port merged 2026-11-02) · **Phase:** milestone 2 passed and the user said go. 2-player mode is removed (play-tested). Sound is ported and play-tested. HUD rework done (awaiting play-test confirmation). Next: optional pacing work (step 5), then milestone 5
+**Last updated:** 2026-11-03 · **Branch:** `dmg-exact` (from `river-2600`) · **Phase:** the dual ROM (GBC and DMG in one) is built and checked in both modes; **waiting for the user's playtest of `roms/river_raid.gb` in both modes.** Merging to `main` is the user's call, after that.
 
 ## Where we are
 
-- The port is GBC-only. The C prototype comes first, then a playtest go/no-go after milestone 2.
-- **Build:** `.\build_gbc.ps1` → `roms/river_raid.gb`, the only GB ROM; delete old trial ROMs rather than keeping versions. It checks the header (`$0143=$C0`, MBC5, 4 banks, checksum), every `.map` area against its bank window, and `.noi` symbols.
-- **Banks:** player.c is in bank 2 (`-Wf-bo2`, set in `build_gbc.ps1`), entities in bank 1. Bank 0 code ends at `$33D6` (~3.1 KB free). Sound is in bank 3 ($4000-$44DB, ~1.2 KB of 16 KB used). Keep `BANKED` on banked public APIs.
-- **GBC code lives in `src/gbc/`** (`main.c`, `config_gbc.h`, `hud_gbc.c`, `sound_gbc.c`). Shared files carry `#ifdef __SDCC_sm83` branches next to the NES code, never replacements, so the milestone 5 merge stays cheap. `build.ps1` builds the NES ROM again (fixed 2026-11-02: `src/platform.h`, NES RAM 3 bytes free); build both after touching shared files.
-- **Main loop** (`gbc/main.c`): river every pass; the player group (`player_update`, `collision_update`) runs at 30 Hz (`LOGIC_FRAMES` 2), the entity group (`entities_update`) on the other passes. On overrun passes `ent_skipped` forces `entities_update` after the player group, so it never starves.
-- **Drawing:** river ring is 32 rows in BG map 0 (`$9800`); the river scroll value is also `SCY` (256 px wrap), no split interrupt. `river_live` stays 0 on GBC so uploads take the direct `set_bkg_data` / `set_vram_byte` path.
-- **Sprites:** logic files compile with `-Dshadow_OAM=gbc_logic_oam` (48 slots, NES coordinates); `oam_camera()` converts them (camera, +16/+8, hide off-view), packs the visible ones into the 40 hardware sprites and sets the VRAM bank 1 bit. Sprite tiles are uploaded with `VBK_REG = 1`. Sprite palettes 0..3 are RGB in `gbc/main.c` (`spr_palette`); `player.c`/`entities.c` still pass NES colour numbers, so main overrides them last.
-- **Shot:** on SM83 it steps 6 px per elapsed tick and hit-tests each step (`player_test_shot`).
-- **HUD:** `gbc/hud_gbc.c`, Window at WY=128, 20x2 cells, tiles in VRAM bank 1 ids 0..35, updated right after `vsync()`. Layout follows `tests/gb/gb_hud*.png`: row 0 lives / centred score (`hud_put_score`, centred for 1..6 digits) / `Bnn`; row 1 `E` bar `F` centred. Idle (ATTRACT): `HI` top-left and the white high score in the centre, no lives. Per-cell palettes 1/4/5/6; 4..6 swap to the low-fuel colours (red gauge, yellow E/F/Bnn) while `sound_warn_on` (exported from `sound_gbc.c`) is set. Sound: `gbc/sound_gbc.c` in bank 3 (1.2 KB), `BANKED` API, `sound_update()` called right after `vsync()` with the real `game_ticks`;
-- **Logic X stays the Atari HPOS**: `SOURCE_X_OFFSET` is 32 on GBC too; only the camera subtracts it.
-- Benchmarks (`GBC_PORT_PLAN.md` → Measurements): the DMG bench said river and entity passes fit the budget; the real ROM at fast speed does not (see next steps). Profiler units: 70,224 per frame, M = units / 2 at double speed. `tests/gb/profile_play.mjs` is the recipe (it finds `_player_invuln` in the `.noi`; build with `-ProfExport`).
-- `main` now carries both targets (merged 2026-11-02). Some gbc-port changes are deliberate gameplay changes on all platforms, so the NES ROM differs from the old NES build. NES history is in `archive/nes/`.
+- **`.\build_gbc.ps1` → `roms/river_raid.gb`: one ROM, header `$80`.** On a GBC it is the finished GBC game (colour, double speed); on a DMG the accepted DMG game (grey, single speed). Chosen at boot from `_cpu` (`gb_cgb`, `src/platform.h`). Both modes use the DMG VRAM layout and the delay queue (226 cache slots); GBC attributes are written at job time, not queued (`PLAN_DMG.md` "Dual ROM").
+- **Builds:** default = dual (`PLATFORM_DMG` + `PLATFORM_DUAL`). `-Dmg` = DMG-only ROM (hash `9EA404E4`). `-GbcOnly` = the old GBC-only ROM (`5598B71F`, reference). `-River2600` implies `-GbcOnly` (`09F504E0`). NES `C1D44CF0`. All unchanged except `-Dmg` (rebaselined for the `di`/`ei` fix in `river_vram_copy_asm`). Reference ROMs of the pre-dual code: `roms/ref/` (git-ignored).
+- **GBC finished on `main`** (`archive/gbc/HANDOFF.md`). `main` does **not** have the Stage 1b speedups, the DMG work or the dual ROM. Not pushed, not merged.
+- **The 2600 river is stale (user, 2026-11-02):** not pursued, but `RIVER_2600`, `RIVER_BLOCKY`, `RIVER_NOFEAT`, `RIVER_FAST`, `-River2600` and `PLAN_2600.md` stay and keep building.
+
+**Fast flight, 10 s, start 0 / 2 / 3** (invulnerable jet holding Up): **dual, GBC 1.00 / 1.00 / 1.00** (0 clamps); **dual, DMG 1.00 / 0.98 / 0.95** (0 / 2 / 2). Before: `river_raid` 1.00 ×3, `river_raid_dmg` 0.99-1.00 / 0.98 / 0.96.
 
 ## Next steps
 
-1. **Go decided (2026-11-01).** 2P removal, sound and the HUD rework are done (HUD play-test pending).
-2. **2-player mode removed from the GBC build (done, user play-tested 2026-11-01).** `TWO_PLAYER` (defined in `config.h` only when not `__SDCC_sm83`) gates `pl_two`, `pl_cur`, `pl_other`, `pl_pads`, `player_swap_players`, the `joypad_ex` path and the turn swap in `player.c`; `hud_two`/`hud_cur`/`hud_other_bcd` and `river_swap_checkpoint` use `#ifndef __SDCC_sm83`. The NES code stays for the milestone 5 merge. The attract menu now steps only the start level 0..3 (Up/Down wrap); SELECT is still the no-crash debug start.
-3. **Sound port done and play-tested (2026-11-01).** Direct map of `src/sound.c` (2A03) onto GB CH1/CH2/CH4 (NES periods via `G(p)`, noise via `nr43_for[]`; tank and extra-life notes use the hardware envelope). Explosion and crash noise are one octave up by choice (`NOISE_UP` in `sound_gbc.c`; set it to 0 to revert). Still to do: re-measure pacing, since sound adds a banked call per frame.
-4. **All bugs from `BUGS&FEATS.md` are fixed and play-tested (2026-11-01).** Notable: camera X in ATTRACT/WAIT comes from the fixed spawn slot `RIVER_SPAWN_SLOT` (28), held without easing (`camera_follow`, `player_center` shares the slot); the pause menu bypasses the camera in `oam_camera` and its cursor tile `HUD_LIFE_TILE` is uploaded in `player_init_graphics`; river road and land colours come from per-row BG attributes in `river_emit_stripe` (palettes 0/2/3); bridge flash is `ent_water_color`. Camera has a 12 px dead zone and pans at 1 px/frame (`GBC_CAM_DEAD`, `GBC_CAM_STEP`; play-tested). Open items: sprite Y, save high score.
-5. **Pacing (merged into `gbc-port`, user play-tested 2026-11-01: good, slight stutter on busy late levels is acceptable).** Done: sprites are re-enabled by a VBlank handler (`hud_show_sprites_isr`), not the main loop (an overrun pass left a whole frame without sprites = the blinking after the HUD-hide fix); `oam_camera` walks the arrays by pointer with the pause path split out (`oam_camera_slow`, kept as the reference): 33 to 20 scanlines per pass, output identical (`-OamCheck` build: 572 passes, 0 mismatches). Fast speed went from 0.69 to 0.76 passes/frame, clamps 6 to 5, cruise still 1.00. Findings: `vsync()` always waits for the NEXT VBlank, so a pass over 154 lines costs 2 frames (step function), and a pass over after a 2-tick pass tends to stay over (heavy player pass with budget 3 rows, then the entity pass). Per-pass cost (lines of 154): entities ~43, player ~15, camera+OAM ~20, one raw row 15-58, a tile job up to 94. Tried and rejected (runs are deterministic: two runs gave identical numbers): player-pass budget 3 to 2 (no pass gain, clamps 5 to 55); a scanline-deadline governor (`river_room` gating row starts and job columns, limits 112/84/52 per pass kind, ramp +25 lines per owed row above 3): passes 0.83 but clamps 70-95; gating rows only, job ungated: passes 0.79, clamps 66, cruise clamps 2. So withholding rows to save the frame costs more scroll hitches than it gains; generation needs ~all the slack (6 owed rows = ~4 frames at fast). Not measured: sound and HUD cost before the pass (`pl_rec[1]` is read after them). Next ideas: cut real work (`entities_update` 43 lines, `river_generate_raw_row`, bcall overhead); scheduling alone did not pay; `LOGIC_FRAMES` 3 needs a play-test. `-ProfExport` builds carry the pass log (`pl_rec`); `tests/gb/run_emu.ps1 tests/gb/pass_log.mjs fast` prints it.
-**Use the advisor before a performance diagnosis or approach**, with measured evidence in the transcript (profiler numbers, what was ruled out). It is not needed for palettes, the HUD or bank moves, and it does not replace the user's playtest or the build checks.
+1. **The user plays `roms/river_raid.gb` on a GBC and on a DMG** (checklist below). On a PC emulator the DMG mode needs a DMG model (Gearboy: `ForceDMG` with `--portable`, see below).
+2. Then: the user decides about merging `dmg-exact` to `main`. Optional: boot time (~1.5-1.9 s blank on a DMG), remaining peaks (`river_find_dup`, `river_copy_template`).
+3. **After the merge, when asked:** NES pacing ideas from the GB work (`archive/nes/BUGS&FEATS.md`, top of FEATURES). The NES ROM stays byte-identical until then.
+
+Stale (do not start unless asked): 2600 river work, **smooth blocky edges**.
+
+**Playtest checklist (both modes, same ROM):**
+- GBC: colours as before: land flip after a bridge, road, low fuel (gauge red, text yellow), bridge flash (red water, HUD not flickering) · fast flight feels as before · **no wrong tiles in the bottom rows** (the old GBC bug should be gone; the user to confirm) · pause, crash, restart, high score after power-off, a long game past level 13.
+- DMG: as the accepted DMG ROM: shades, FUEL, balloon, low fuel (E and F blink), bridge flash (HUD flickers with the water: does it bother you?) · fast flight on start levels 1, 20, 50.
+- Same save file for both (`river_raid.sav`).
+
+**Per-step check:** `host_river.ps1` (exact), `-Blocky`, `host_river_fast.ps1 -Rows 20000 -JobCols 10`, `host_river_queue.ps1`, `.\build.ps1` (NES hash), then `.\build_gbc.ps1`, `-GbcOnly`, `-River2600`, `-Dmg`; compare hashes (above). Bank 0 end in the `.map` (`$36F3` now). **After assembly or its C twin:** `-OamCheck` and `-RiverCheck` ROMs, run in **both** machines with `profile_play.mjs`: all error counts 0. **Before a handover, both machines:** `sprite_check.mjs`, `gbc_check.mjs` (GBC; needs a `-ProfExport` ROM) and `dmg_check.mjs` (DMG), then look at screenshots (`collect_shots.mjs` + `montage.mjs`).
+
+**Running a test (use this, not a hand-started Gearboy):** `.\tests\gb\run_emu.ps1 <script> <arg> [<arg2>] -Rom roms/NAME -Machine gbc|dmg` starts its own Gearboy on port 7790, confirms the machine from the boot registers (`mode_probe.mjs`) and stops only its own PID (other agents may run theirs; never stop `Gearboy` by name). `-Machine dmg` sets `ForceDMG = true` in `gearboy/config.ini`, read only with `--portable`; the script restores it. `get_media_info.is_cgb` is the header flag, not the mode.
+
+**Profile:** `.\build_gbc.ps1 -ProfExport -Name rr_x`, then `$env:GB_START_LEVEL=n; .\tests\gb\run_emu.ps1 tests/gb/profile_play.mjs fast 24 -Rom roms/rr_x -Machine gbc`.
+
+**Scripting traps:** do not pass build switches as `@array` to `build_gbc.ps1` (they bind positionally and nothing builds); its "Built" line is `Write-Host`, so capture with `*>&1` and check the file time. A build overflow check fails but later commands in the line still run: read the `.map`. Source files are CRLF: edit with the Edit tool, or normalise line endings in scripts.
 
 ## Decisions not to reopen
 
-- **GBC only.** DMG is dropped.
-- **Fast flight stays at 1.5 px/frame.** NES play-testing found 2.0 worse.
-- **Logic keeps NES coordinates.** Only drawing uses the camera. This protects validated Atari behaviour.
-- **Exact river tile cache.** 213–228 slots in bank 0 against a measured peak of 182. No atlas.
-- **HUD art comes from `charset.bin`.** Do not redraw it.
-- **Sound values come from live Atari captures.** Not estimates.
-- **The user runs the playtests.** Claude builds the ROM and hands over a checklist.
+- **Logic keeps NES coordinates.** Only drawing uses the camera. This is why the delay queue exists.
+- **Collision and drawing share one edge description** (`rg_row_left/right`).
+- **Performance before authenticity** (user, 2026-11-02). Cutting art is the user's call.
+- **Delay queue and shared tiles for the DMG; the DMG ROM's feel is accepted** (user, 2026-11-02). The GBC uses the same queue and layout in the dual ROM; its sprites and HUD stay in bank 1.
+- **Fast flight stays at 1.5 px/frame**, **HUD art from `charset.bin`**, **sound values from live Atari captures**, **the user runs the playtests**.
 
 ## Where to look
 
 | Topic | Where |
 |---|---|
-| Plan, decisions, milestones, risks, Gearboy notes | `GBC_PORT_PLAN.md` |
-| Rules, toolchain, Gearboy MCP | `AGENTS.md` |
-| River generator and cache | `tools/river_model.py`, `src/river.c`, `tests/host_river.ps1` |
-| Sprite and palette generation | `tools/gen_entity_gfx.py` |
-| Atari behaviour | `docs/ATARI_RE_SPEC.md`, `docs/atari_disasm_*.txt` |
-| Atari RE tools | `info/LESSONS.md` → "Reverse Engineering Tools", `info/ALTIRRA_BRIDGE_NOTES.md` |
-| HUD glyphs | `assets/atari/extracted/README.md` |
-| Gearboy pacing tools | `tests/gb/` (`profile_play.mjs`, `pass_log.mjs`, `run_emu.ps1`) |
-| Bugs and feature ideas | `BUGS&FEATS.md` |
-| NES history (only if needed) | `archive/nes/` (see its README) |
+| The plan, tile budget, dual ROM decisions and results | `PLAN_DMG.md` |
+| Machine flags | `src/platform.h` (`PLATFORM_DMG`, `PLATFORM_DUAL`, `GB_HAS_CGB`, `gb_cgb`) |
+| Boot, OAM, camera | `src/gbc/main.c` |
+| HUD (runtime tile base, both machines) | `src/gbc/hud_gbc.c` |
+| River code, queue, attributes | `src/river.c`, `tools/river_model.py` |
+| DMG layout and shades | `src/gbc/config_gbc.h`, `dmg_sprite_data` in `src/gbc/main.c` |
+| Entity palette tables | `tools/gen_entity_gfx.py` → `src/entity_gfx.c` (`ent_gfx_pal`, `ent_gfx_pal_dmg`) |
+| Host checks | `tests/host_river.ps1`, `host_river_fast.ps1`, `host_tile_budget.ps1`, `host_river_queue.ps1` |
+| Emulator checks | `tests/gb/`: `run_emu.ps1`, `mode_probe`, `sprite_check`, `gbc_check` (+`gbc_colours.json`), `dmg_check`, `collect_shots`, `montage`, `profile_play` |
+| Rules, toolchain, Gearboy | `AGENTS.md` |
+| 2600 work | `PLAN_2600.md`, `docs/PROPOSAL_2600_RIVER_MODE.md` |
+| GBC / NES history | `archive/gbc/`, `archive/nes/` |
 
 ## Known gaps
 
-- `river.c` emits harmless `always false` warnings (zero-width margin loops, `RIVER_LEFT_COL` is 0 on GBC).
-- The "GBC REQUIRED" screen (`_cpu != CGB_TYPE`) has never been run on a plain Game Boy.
-- The NES ROM builds; differences from the old NES build include intended cross-platform gameplay changes. NES code is still in the tree: `build.ps1`, `tests/nes_*.mjs`, `tests/perf_*`, and NES parts of `src/`. Remove or move it when it gets in the way; `main` keeps it until milestone 5.
+- **Nothing has run on real hardware.** Gearboy does not model the mode-3 VRAM write lockout (a build with the wait removed gives 0 readback errors), so the timing of `river_vram_copy_asm` (now with `di`/`ei`) is reasoning, not measurement. Shades on a real DMG LCD and colours on a real GBC are unchecked.
+- **A fully white screenshot in DMG mode, once or twice after a long collector run, in state 3, not reproduced** (`BUGS&FEATS.md`). Short sequences are identical on the dual and the old `-Dmg` ROM.
+- `sprite_check.mjs` has an occasional false miss in DMG mode (also on the old `-Dmg` ROM). `gbc_check.mjs` and `dmg_check.mjs` test plain rows and the first start levels; the exact picture is proved on the host.
+- Not looked at in a screenshot: level 13+ fast helicopters and their missile; the GBC low-fuel HUD colours by pixel.
+- `-River2600` is GBC-only and does not use the queue (its bank 0 had ~190 bytes free); `-Dmg -River2600` has never run. `river_mixed_col` needs `river_lut_p1` right after `river_lut_p0`; `RIVER_GRID=4` fails `host_river_fast.ps1`.
+- The `need` line of `tile_budget_main.c` is meaningless in a `-DPLATFORM_DMG` build; its clobber count is valid.
 
 ## End of session (keep this cheap)
 
-1. **Rewrite and trim this file.** Update the date, move finished items out, and correct the budgets. Delete what is no longer true instead of annotating it. Check the size first: `(Get-Content HANDOFF.md).Count` (target ~100, trim past ~150).
-2. **Append one entry to `PROGRESS.md` without reading it.** The closing `'@` must stay at column 0:
-
-```powershell
-Add-Content -Path PROGRESS.md -Encoding utf8 -Value @'
-
-### YYYY-MM-DD - Short title (branch `name`)
-
-- What changed and why; ground truth used; build line; tests run and results.
-'@
-```
-
+1. **Rewrite and trim this file.** Update the date, move finished items out. Check the size: `(Get-Content HANDOFF.md).Count` (target ~100, trim past ~150).
+2. **Append one entry to `PROGRESS.md` without reading it** (`Add-Content -Path PROGRESS.md -Encoding utf8 -Value @'...'@`, the closing `'@` alone at column 0), as a `### YYYY-MM-DD - Short title (branch name)` heading and bullets: what changed and why, ground truth, build line, tests and results.
 3. Do not edit `AGENTS.md` for status.

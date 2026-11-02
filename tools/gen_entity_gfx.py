@@ -200,6 +200,9 @@ extern const uint8_t ent_gfx_count[18];
 extern const uint8_t ent_gfx_rows[18];
 extern const uint8_t ent_gfx_cols[18];  /* width in 8-px tiles (SIZEP3) */
 extern const uint8_t ent_gfx_pal[18];
+#ifdef PLATFORM_DUAL
+extern const uint8_t ent_gfx_pal_dmg[18];   /* the dual ROM picks one of the two at boot */
+#endif
 /* Bridge explosion: tile index (0xFF = blank, not drawn) per frame 2..6, row, column. */
 extern const uint8_t ent_exp14_map[60];
 /* Sprite palettes 1 (bridge), 2 (helicopters) and 3 (ships); palette 0 is the jet's. */
@@ -224,7 +227,13 @@ out_c += carr("const uint8_t ent_exp_first[18]", exp_first)
 out_c += carr("const uint8_t ent_gfx_count[18]", count)
 out_c += carr("const uint8_t ent_gfx_rows[18]", rows_of)
 out_c += carr("const uint8_t ent_gfx_cols[18]", cols_of)
+# DMG: the balloon is on OBP1 whole, as OBP0's colour 1 is the jet's black (see entities_init_graphics).
+dmg_pal = list(pal)
+dmg_pal[BALLOON] = 1
+# PLATFORM_DMG alone: the DMG ROM's table.  PLATFORM_DUAL: the GBC table plus ent_gfx_pal_dmg.
+out_c += "#if defined(PLATFORM_DMG) && !defined(PLATFORM_DUAL)\n" + carr("const uint8_t ent_gfx_pal[18]", dmg_pal) + "#else\n"
 out_c += carr("const uint8_t ent_gfx_pal[18]", pal)
+out_c += "#ifdef PLATFORM_DUAL\n" + carr("const uint8_t ent_gfx_pal_dmg[18]", dmg_pal) + "#endif\n#endif\n"
 out_c += carr("const uint8_t ent_exp14_map[60]", exp14_map, 12)
 out_c += "const uint8_t ent_gfx_palette[3][3] = {\n" + "".join(
     "    { " + ", ".join(f"0x{c:02X}" for c in PALETTES[g]) + " },\n" for g in (1, 2, 3)) + "};\n"

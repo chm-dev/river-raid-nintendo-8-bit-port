@@ -1,155 +1,73 @@
-# PROGRESS — GBC port history (append-only)
+# PROGRESS — 2600 river mode
 
-Append-only log, one `### date - title` entry per session. Do not read it whole; grep it for a keyword.
-The NES history is in `archive/nes/PROGRESS.md`.
+Append-only. Do not read whole; grep for a keyword and read the matching `### date - title` entry. Earlier history: `archive/gbc/PROGRESS.md`, `archive/nes/PROGRESS.md`.
 
-### 2026-10-31 - Start GBC branch and reorganise docs (branch `gbc-port`)
+### 2026-11-02 - Workspace prepared for the 2600 river mode (branch `river-2600`)
 
-- Created `gbc-port` from `experiment/gb-feasibility` and merged `main` (which added `GBC_PORT_PLAN.md`). `main` is unchanged.
-- Moved the NES-only docs to `archive/nes/` with `git mv` (history kept): HANDOFF, PORTING_PLAN, PROGRESS, BUGS&FEATS, AGENTS, README, MESEN_MCP_NOTES, PERFORMANCE_SUMMARY, LESSONS.
-- New `AGENTS.md`, `HANDOFF.md`, `PROGRESS.md`, `BUGS&FEATS.md`, `README.md` and a trimmed `info/LESSONS.md` (Atari RE section and the lessons that carry over).
-- `GBC_PORT_PLAN.md` moved from `docs/` to the root. Gearboy MCP notes added to `AGENTS.md`.
-- Code is unchanged: no NES code was moved or deleted. No build was run (there is no GBC build yet).
+- Branched from `main` (`95e0074`). Moved `HANDOFF.md`, `GBC_PORT_PLAN.md`, `PROGRESS.md`, `BUGS&FEATS.md` to `archive/gbc/` with `git mv` (history kept) and added `archive/gbc/README.md`.
+- New `HANDOFF.md`, `PLAN_2600.md` (Stage 1 checklist, gates, baseline table), `PROGRESS.md`, `BUGS&FEATS.md`. `AGENTS.md` updated to point at them. Proposal's Decision section records the start of Stage 1.
+- Found: the mod XEX is 10,754 bytes against 8,220 for the original.
+- No code changed, no build run.
 
-### 2026-10-31 - GBC milestone 1: build script, river, camera, jet (branch `gbc-port`)
+### 2026-11-02 - Stage 1 of the 2600 river: mod scope, baseline, blocky fast path (branch `river-2600`)
 
-- Added `build_gbc.ps1` (compile, MBC5 4-bank link, checks: header `$0143/$0147/$0148/$014D`, `.map` bank windows, WRAM/HRAM ranges, `.noi` symbols). `makebin -h` confirmed `-yC` = CGB only.
-- GBC code in `src/gbc/` (`main.c`, `config_gbc.h`, `stubs_m1.c`); shared files got `#ifdef __SDCC_sm83` branches only (`config.h`, `river.h`, `river.c`, `player.c`).
-- River: 32-row ring in BG map 0 at `$9800`, scroll value doubles as `SCY`; `river_live` stays 0 on GBC because `river_put()` is a no-op on C paths (symptom of getting this wrong: one row of river, then black).
-- Sprites: logic files built with `-Dshadow_OAM=gbc_logic_oam`; `oam_camera()` translates to hardware OAM; sprite tiles in VRAM bank 1. `SOURCE_X_OFFSET` stays 32 (logic X is the Atari HPOS).
-- Build line: `.\build_gbc.ps1 -Name m1_jet -RequireSymbols _frame_counter,_gbc_logic_oam -Sources src/gbc/main.c,src/gbc/stubs_m1.c,src/atari_data.c,src/collision.c,src/river.c,src/entities.c,src/entity_gfx.c,src/player.c`. Bank 0 code ends at `$3F6B` (about 150 bytes free).
-- Playtest by the user: smooth scrolling, jet steers, camera pans, shooting destroys enemies. Open: invisible shot, black enemy sprites, some glitching hills/trees, jet too high on screen, occasional stutter at fast speed. All in `BUGS&FEATS.md`.
-- Not tested: build-check failure paths other than a missing symbol; the GBC-required screen on a plain Game Boy; the river job overrun measurement.
+- Mod = original cart + 961 patched bytes (booted XEX in AltirraBridge, dumped RAM). River patches: `$A89F` cmp operand `$EA` (straight banks), `$BA8F` walk table zeroed, `$A976` opcode change (feature rate, not modelled). `tools/river_validate.py` with `RIVER_CART=` reproduces the mod trace except the feature select.
+- Baseline (exact river): fast 0.76 passes/frame, DMG proxy 0.37; `river_update` avg 33.9k. Written in `PLAN_2600.md`.
+- Built `RIVER_2600`/`RIVER_BLOCKY`/`RIVER_NOFEAT`/`RIVER_FAST` in `src/river.c` and the model. Plain tile rows become atlas tile ids without rendering; the previous band's ids are reused on straight stretches. User gates: X=1.00, Y=0.60.
+- Result: fast 0.97, DMG proxy 0.57 (level 1). Not met. Remaining: band replay peaks, islands, oam_camera.
+- Tests: `host_river.ps1` default/-Mode2600/-Blocky/-Blocky -Grid 4 all match the model; `host_river_fast.ps1` (grid 8) identical on 4 start levels; NES build OK; GBC bank 0 checked (`$3E70` end without ProfExport). Playtest not run (user).
 
-### 2026-10-31 - Milestone 2 build: OAM slots, sprite palettes, Window HUD (branch `gbc-port`)
+### 2026-11-02 - Stage 1b planned: performance to an acceptable DMG speed (branch `river-2600`)
 
-- Found `PLAYER_SHOT_SLOT = 47` and `ENT_OAM_LAST = 43` against a 40-entry `gbc_logic_oam`: the shot was invisible and logic wrote past the array. Now 48 logic slots packed into 40 hardware sprites in `oam_camera()`.
-- Sprite palettes set as RGB in `gbc/main.c`; new `src/gbc/hud_gbc.c` (Window HUD, bank 1 tiles 0..23). HUD state moved out of `stubs_m1.c`.
-- Build `-Name m2_hud` with `src/gbc/hud_gbc.c` added to the milestone 1 list: all checks pass, bank 0 code ends at $357A. Not run in an emulator; the user playtests.
+- The user played `roms/river_raid_2600_slow.gb` (single-speed proxy): "almost acceptable but still not there"; the blocky look is disliked. Assessment of the remaining room (no code changed): entities+player ~40% of a pass, river ~21%, `oam_camera` ~12%.
+- Added Stage 1b to `PLAN_2600.md` (8 ordered steps, results table), the "smooth blocky edges" idea to `BUGS&FEATS.md` (parked), `tools/resolve_sub.py` (names profiler `SUB_` entries), and rewrote HANDOFF next steps.
 
-### 2026-10-31 - Late shot hits: sub-stepped shot (branch `gbc-port`)
+### 2026-11-02 - Stage 1b: DMG-clock performance, gates met (branch `river-2600`)
 
-- Cause: at 30 Hz logic the shot jumped 12 px per pass and was tested only at the end, so hits registered up to 6 px late. `player_update_shot` now steps 6 px per elapsed tick and runs `player_test_shot` (river banks + `entities_hit_shot`) at each step; NES path unchanged.
-- Build: `.\build_gbc.ps1` ok, all checks pass. Not play-tested (user to confirm).
+- Fast flight at the DMG proxy 0.57 -> 0.99 passes/frame, double speed 0.97 -> 1.00, default exact ROM 0.76 -> 1.00 (10 s windows; proxy start indexes 0/2/3 all 0.99, clamps 0/2/1). Work per pass 82k -> 36k units.
+- New tools: `tests/gb/trace_prof.mjs` + `tools/trace_hist.py` (cycle-exact trace, per phase and worst passes; the profiler charges banked bodies to `.call_hl`), `tools/prof_summary.py`, `-PassLog` split from `-ProfExport`, `GB_START_LEVEL`.
+- Cuts: HUD returns when its inputs are unchanged (8k per pass); entity rows above the view not drawn; missile search behind a flag; `oam_camera` walks live slots; river convert/copy use the NES solid-column scheme in C (the GBC ran a slow reference version); inline stripe write.
+- Pacing: `vsync()` made pass time a step function. A finished pass now publishes scroll and a double-buffered OAM page to the VBlank handler; the next pass starts at once after an overrun.
+- User lifted the no-assembly gate: sm83 for `oam_camera`, entity draw/emit/follow/scan and river scan/mixed/copy/compare/fill, each checked against its C (`-OamCheck`, `-RiverCheck`: 0 errors). The plan's bcall-overhead estimate was wrong: ~1% of time.
+- Tests: host_river_fast 20000 rows x 4 identical, host_river -Blocky and exact match, golden diff against the previous commit identical, NES builds (3 bytes free). Playtest pending: `roms/river_raid_2600_slow.gb`.
 
-### 2026-10-31 - Entity group starvation on overrun passes (branch `gbc-port`)
+### 2026-11-02 - Fix: entity sprites invisible in the Stage 1b ROMs (branch `river-2600`)
 
-- Hypothesis (not measured): when a pass lasts >= 2 frames, `logic_acc` reaches LOGIC_FRAMES every pass, so `entities_update()` never ran (enemies slow/stuttering, stale entities, slow death animation in busy scenes). `gbc/main.c` now runs it after the player group when the previous pass skipped it (`ent_skipped`).
-- Build ok. If the symptoms stay, profile the busy-scene pass cost (player + entities + river in one pass) before anything else.
+- User playtest: all sprites but the jet invisible, both ROMs. `ent_emit_row`'s pointer rewrite and `ent_emit_asm` wrote the NES byte order (y, tile, prop, x), not the GB's (y, x, tile, prop); `-OamCheck` compared them with each other. Fixed both; the C uses named fields. New `tests/gb/sprite_check.mjs` checks the hardware OAM against `ent_x`/`ent_y`: 26/26 missing before, 0/49 after. Screenshots show enemies. Re-measured: proxy 0.99, double speed 1.00, as before. Playtest pending again.
 
-### 2026-10-31 - Jet 4 px lower on GBC (branch `gbc-port`)
+### 2026-11-02 - Exact river accepted at the DMG clock; next step planned (branch `river-2600`, then `dmg-exact`)
 
-- `PLAYER_START_Y` is 222 on SM83 (218 on NES). The view is bottom-anchored, so only the jet's logic Y can move it; 222 is the limit because sprites at y >= 232 are culled. Handoff, `BUGS&FEATS.md` (`[~]`) and the plan's risk note updated.
-- `.\build_gbc.ps1` passes all checks; bank 0 code ends at `$35A2`. Not playtested yet.
+- User playtested the slow exact ROM for some time: "truly acceptable". 2600 river parked, not removed. New `PLAN_DMG.md` (tile budget 388 of 384 by count, river figure unmeasured; tasks, gates, fallbacks). Docs updated; branch `dmg-exact` created from `river-2600`. No code changed.
 
-### 2026-11-01 - Hills/trees glitch closed; host river check revived (branch `gbc-port`)
+### 2026-11-02 - Exact river on DMG: measured, delay queue, shared tiles, ROM built (branch `dmg-exact`)
 
-- The "some side hills and trees glitch" bug no longer reproduces; an earlier change must have fixed it (cause never found). Marked done in `BUGS&FEATS.md`, removed from `HANDOFF.md` next steps.
-- `tests/host_river.ps1` no longer built (river.c includes `<gb/gb.h>`, stub existed only as `nes/nes.h`). Added `tests/host/gb/gb.h` forwarding to it. Result: all 19999 rows match `tools/river_model.py` for all four start levels.
+- Task 1: new `tests/host_tile_budget.ps1` with the real spawner and on-screen geometry. `SCY = scroll + 82`, so a row is written 98 px above the view and holds a slot for 28 tile rows: 259-266 slots needed, 178 left. The clobber test decided from map row and SCY alone confirms the predicted sizes (6 of 6 cases, 4 starts). The 250-slot GBC exact ROM does clobber rarely, in the bottom ~10 px; the NES has the same lifetime by geometry, not measured (`BUGS&FEATS.md`, not fixed). Reported to the user, who chose the delay queue and tile sharing.
+- `build_gbc.ps1 -Dmg` / `PLATFORM_DMG`: queue in `river.c` (rows upload 32 px above the view, 206 needed, 226 allocated), `river_vram_copy_asm`, boot-time sprite tile sharing (167 to 124) with `dmg_tile_map` in `oam_camera`, HUD 26 tiles, one BGP + OBP0/1, low-fuel E/F blink, no VBK writes.
+- Results: fast 0.99 / 0.98 / 0.96 passes/frame on starts 0 / 2 / 3, clamps 1 / 2 / 1-2; cruise 1.00. The accepted proxy ROM: 1.00 / 0.97 / 0.95.
+- Tests: `host_river.ps1` (exact, `-Blocky`, `-Mode2600`), `host_river_fast.ps1 -Rows 20000 -JobCols 10`, new `host_river_queue.ps1` (picture identical, 0 clobbers in 24 runs, negative control 36), `-Dmg -OamCheck` and `-RiverCheck` 0 errors, new `tests/gb/dmg_check.mjs` and `sprite_check.mjs` pass. `river_raid.gb`, `_slow`, `_2600`, `_2600_slow` and `.nes` are byte-identical to before. Screens looked at. Not run on a real DMG; the user's playtest is next.
 
-### 2026-11-01 - Fast-speed pacing: measure, oam_camera, job split (branch `gbc-port`)
+### 2026-11-02 - DMG ROM passes the user's playtest; FUEL and balloon colours (branch `dmg-exact`)
 
-- First profile of the real ROM in play (Gearboy, double speed, units of 70,224 per frame; `tests/gb/profile_play.mjs`). Fast speed ran 305 passes in 598 frames (0.51 per frame). `SUB_00_0324` = `oam_camera`, 31k units per pass.
-- `oam_camera`: 8-bit early-out on hidden slots plus wrap-compare range tests; exhaustive host check over every y/x/camera (0 mismatches). 31k to 7-12k per pass; bank 0 code shrank about 130 bytes.
-- `river_run_job`: budget of `RIVER_JOB_COLS` (10) non-solid columns per `river_update` (stripe worth 3), resumes via `river_job_col`; `river_start` runs it unlimited. `tests/host_river.ps1 -JobCols 10/6/3`: all rows match the model for the four start levels. Added `river_clamps` / `river_owed_max` counters (read by `profile_play.mjs`). Budget sweep at fast, 10 s: 6 = 26 clamps, 10 = 5, unlimited = 3; the split is insurance for heavy jobs, not a measured pacing win.
-- Result: fast 0.51 to ~0.75 passes per frame (nearly all from `oam_camera`), cruise 1.00. Player-pass generation budget 3 to 2 was tried and reverted (river_update peak 81k to 66k, pass rate unchanged).
-- Build: `.\build_gbc.ps1` passes all checks. Corrected the profiler unit note in AGENTS.md and the plan.
+- The user played `roms/river_raid_dmg.gb`: "absolutely flawless", every checklist item passes. Then asked for FUEL in dark and light grey, and a light grey balloon with a dark grey stripe and basket.
+- `OBP0` colour 2 is light grey. That would have washed out enemy jets (colour 2 only), so they and their explosion move to colour 3 at upload. Balloon on `OBP1` (`gen_entity_gfx.py`: DMG `ent_gfx_pal`), colours shifted up at upload. `dmg_check.mjs` expects those indexes.
+- Tests: GBC, slow, 2600, 2600 slow and NES ROMs byte-identical; `host_river.ps1`, `host_river_queue.ps1`, `-Dmg -OamCheck` and `-RiverCheck` 0 errors, `dmg_check.mjs`, `sprite_check.mjs`; fast 1.00 / 0.98 / 0.96. Screens of balloon, FUEL and enemy jet looked at. Not yet seen by the user.
 
-### 2026-11-01 - Milestone 2 playtest passed; docs closed out (branch `gbc-port`)
+### 2026-11-02 - User confirms the rest; 2600 river and smooth edges stale (branch `dmg-exact`)
 
-- The user ran the full m2 checklist at the end of the pacing work (fast speed, edges, crash/respawn, roads and bridges, fuel/lives/score, shot): all OK. Stutter bug marked `[x]`.
-- The user added open bugs (camera alignment, bridge flash, road colour, grass alternation, smarter camera) and the pause-menu note; kept as is.
-- HANDOFF rewritten: next is the go/no-go call, then milestone 3 colour work. Bank 0 ends at `$3538`. The shipped `roms/river_raid.gb` is the plain (non `-ProfExport`) build, `RIVER_JOB_COLS` 10.
+- The user confirmed the DMG colours, the high-score save and the sprite Y position. Marked `[x]` in `BUGS&FEATS.md`. The user made 2600 river mode and smooth blocky edges stale (new status `[-]`); no code changed, `-River2600` stays.
 
-### 2026-11-01 - Remove two-player mode from the GBC build (branch `gbc-port`)
+### 2026-11-02 - Next task set: one ROM for GBC and DMG (branch `dmg-exact`)
 
-- User decision after the m2 playtest: go; keep bugs and HUD rework for later, remove 2P, then sound. `TWO_PLAYER` (config.h, non-sm83 only) gates the 2P state, player swap, `joypad_ex` path and 2P game-number step in `player.c`; `river_swap_checkpoint` and the `hud_two`/`hud_cur`/`hud_other_bcd` externs use `#ifndef __SDCC_sm83`; the GBC HUD no longer defines them. The attract menu steps only the start level 0..3. NES code kept for the milestone 5 merge.
-- Build: `.\build_gbc.ps1`, all checks ok; bank 0 code now ends at `$33D6` (was `$3538`). User play-tested: level cycling, START, death/respawn, game over, SELECT debug start all fine.
+- The user wants a single ROM supporting both, before merging to `main`. Outline in `PLAN_DMG.md` "Dual ROM"; not started, no code changed.
 
-### 2026-11-01 - GBC sound port (branch `gbc-port`)
+### 2026-11-02 - NES pacing ideas recorded for after the merge (branch `dmg-exact`)
 
-- `src/gbc/sound_gbc.c` (bank 3, `-Wf-bo3`): sound.c ported to the GB APU (pulse1->CH1, pulse2->CH2, noise->CH4). Pitch via `G(p)` = 2048 - 131072/111861*(p+1); noise via `nr43_for[]`; tank/bonus notes use the hardware envelope (1/64 s step), other volume changes retrigger. `sound.h` declares the API `BANKED` on SM83. `gbc/main.c` now calls `sound_init()` and `sound_update()` (after `vsync()`, before `game_ticks` is merged). `stubs_m1.c` emptied.
-- Build: `.\build_gbc.ps1` passes all checks; bank 3 `_CODE_3` $4000-$44D6. Not play-tested.
+- The NES `vsync()` has the GB's step-function flaw (disassembled at `$C357`), but late frames were only 1.0-3.3% and a second OAM page does not fit. Ideas (measure first, idle-time row generation, HUD split wait) are in `archive/nes/BUGS&FEATS.md`, with a pointer in `archive/nes/HANDOFF.md` and `HANDOFF.md`. No code changed.
 
-- Follow-up 2026-11-01: explosion and crash noise raised one octave (`NOISE_UP`, a second `nr43_for` half). User play-tested the full sound set and passed it. `stubs_m1.c` removed.
+### 2026-11-03 - Dual GBC/DMG ROM (branch `dmg-exact`)
 
-### 2026-11-01 - Fix invisible pause menu (branch `gbc-port`)
-
-- Cause: player.c draws the pause letters in NES OAM slots 56..63, but `gbc_logic_oam` had 48 slots (LOGIC_OAM_SLOTS), so those writes went past the array and oam_camera never saw them; only slots 2..4 (cursor, "I", "T") showed. Fix: LOGIC_OAM_SLOTS 64 in src/gbc/main.c (also removes the stray writes past the array).
-- `.\build_gbc.ps1` passes all checks. Awaiting user playtest.
-
-### 2026-11-01 - Camera aligned with the jet spawn point before start (branch `gbc-port`)
-
-- Bug: during the scroll-in (PLAYER_STATE_WAIT) the camera followed player.x = PLAYER_START_X; player_center() moves it to the river centre only when the jet appears, so the view panned afterwards. Fix: camera_follow() in src/gbc/main.c targets the river centre at PLAYER_START_Y while in WAIT (same formula as player_center). Marked [~] in BUGS&FEATS.md.
-- Build: .\build_gbc.ps1 passes all checks (4 banks, map inside windows). No gameplay test run (user playtests).
-
-### 2026-11-01 - Bridge-hit flash on GBC (branch `gbc-port`)
-
-- Bug: no flash after shooting a bridge with the tank on it. The flash logic (`bridge_flash`, `ent_flash_tick`) was shared, but `ent_water_color` used `set_bkg_palette_entry`, which `entities.c` defines away. Added a `__SDCC_sm83` branch that rewrites BG palette 0 colour 3 (water) with `set_bkg_palette`: dark red RGB(24,5,3) on odd remaining frames for 23 frames, else RGB(6,12,26). NES path unchanged.
-- Build: `.\build_gbc.ps1` passes all checks. Not play-tested (marked [~]).
-
-### 2026-11-01 - GBC road and grass colours (branch `gbc-port`)
-
-- Bugs: road green, grass not alternating between bridges. Cause: one BG palette on GBC; the NES per-row palette logic (`river_job_pal`, `river_land_alt`) had no GBC output. Fix: per-map-row BG attribute (VRAM bank 1) written in `river_emit_stripe` only when it changes (`river_slot_attr`), cleared in `river_start`; palettes 0 dark land, 2 bright land, 3 road (grey, yellow line), 1 stays the HUD. `ent_water_color` writes water into all three, only on state change.
-- Build: `.\build_gbc.ps1` passes all checks. Not play-tested.
-
-### 2026-11-01 - Player shot drawn 1 px wide (branch `gbc-port`)
-
-- Shot tile in `tools/gen_entity_gfx.py` is now one pixel column (0x10, was 0x18); regenerated `src/entity_gfx.c` (shared with NES). Draw x offset (shot_x - 3) still puts the column at shot_x; hit box unchanged. `.\build_gbc.ps1` passes all checks. Not playtested.
-
-### 2026-11-01 - Pause menu centred on the GBC screen (branch `gbc-port`)
-
-- Bug: the pause menu was horizontally centred only for one camera position and sat too high (rows at screen y -1 and 15, i.e. half off the top). Cause: the menu sprites were NES logic coordinates run through the camera. Fix: while `player_state` is PAUSE, `oam_camera()` copies logic slots 56..63 and 2..4 to hardware OAM untranslated; under `__SDCC_sm83` `src/player.c` uses hardware coordinates (rows at screen y 60 and 76, columns 48..112: centre 72 of 144 and 80 of 160) and the hide band moves to logic scanlines 172..197. NES unchanged.
-- Build: `.\build_gbc.ps1` passes all checks. Not playtested (marked [~]).
-
-### 2026-11-01 - Player shot centred on the jet nose (branch `gbc-port`)
-
-- Bug: the 1 px shot appeared about 2 px left of the jet's centre. Cause: the straight jet tile has its nose at column 4 (`0x08`, rows symmetric about column 4) while the shot bar is column 3 of its tile and was drawn at `shot_x - 3`, i.e. at jet x + 3. Fix: draw offset `shot_x - 2` in `src/player.c` (bar at jet x + 4). Tile and 2 px hit box (`shot_x` = jet x + 3) unchanged.
-- Build: `.\build_gbc.ps1` passes all checks. Not playtested (marked [~]).
-
-### 2026-11-01 - Camera snaps to centre on attract and respawn scroll-in (branch `gbc-port`)
-
-- Bug: the camera X from the previous death carried into the next scroll-in and attract. Cause: `camera_x` (`src/gbc/main.c`) was only eased toward its target, never reset. Fix: `camera_follow()` tracks `player_state`; on a change to WAIT or ATTRACT it snaps `camera_x` to `GBC_CAM_CENTER` (16, mid of 0..32); attract targets the centre; WAIT still targets the spawn-row river centre. `camera_x` now initialises to the centre. NES unchanged.
-- Build: `.\build_gbc.ps1` passes all checks. Not playtested (marked [~]).
-
-### 2026-11-01 - GBC camera spawn view and pause cursor (branch `gbc-port`)
-
-- Camera X (third attempt): in WAIT `camera_follow` fell back to `player.x` (the death X; 120 at boot) until the river reached the spawn row, ~17 lines before the jet appears, then eased; the a6228dd snap to 16 was undone at once. Attract's 16 was 1 px left of the level-1 spawn view. Fix: `RIVER_SPAWN_SLOT` (`river.h`, ring slot 28 = third tile row after `river_start`); `player_center` uses it on GBC (the slot at `player.y` was slot 27, 3 px off, when the scroll-in overshot by 7+ px); `camera_follow` latches `clamp(centre(slot) - 80, 0, 32)` in ATTRACT/WAIT once the slot is generated (view still black), re-read when the slot's bounds are 0 (any river restart), snaps in READY, eases only from PLAY. `river_model.py` trace of slot 28 camera: new game levels 1/5/20/50 = 17/18/17/18; 30 checkpoints 9..24; slot 27 is 3 px left of slot 28 in every case. Commit 9f14aeb.
-- Pause cursor invisible: sprite tile `HUD_LIFE_TILE` is uploaded only by the NES `hud.c`; on GBC it stayed blank. `player_init_graphics` uploads the `$5C` glyph (plane 0). Commit 765b627.
-- `.\build_gbc.ps1` passes all checks (bank 2 code $4000-$4D6D); `tests/host_river.ps1` all rows match. Awaiting playtest.
-
-### 2026-11-01 - Riverside hills/trees yellow to brown (branch `gbc-port`)
-
-- Cause: river hills/trees use pixel value 2 (comment at river.c:542), which in land palettes 0 and 2 was GBC_RGB_YELLOW (shared with the road line). Fix: new GBC_RGB_BROWN RGB(15,9,3) in index 2 of palettes 0 and 2 (gbc/main.c, entities.c flash copy); road palette 3 keeps the yellow line. Water, HUD untouched. Build ok (build_gbc.ps1, all checks pass). Not played.
-
-### 2026-11-01 - GBC HUD rework (branch `gbc-port`)
-
-- `src/gbc/hud_gbc.c` rebuilt from the mockups `tests/gb/gb_hud.png`, `gb_hud_lowFuel.png`, `gb_hud_idle.png`: lives left, score centred on row 0 (start column from the digit count; odd counts sit half a tile right), `Bnn` right, `E`/8-cell bar/`F` centred on row 1 (cols 5..14).
-- Colours by per-cell palette (1 yellow, 4 B/F, 5 E, 6 gauge). Palettes 4..6 are rewritten in `hud_update()` when `sound_warn_on` changes (renamed from `snd_warn_on`, exported, declared in `sound.h` under `__SDCC_sm83`): gauge red and E/F/Bnn yellow while the low-fuel note sounds.
-- Idle (`PLAYER_STATE_ATTRACT`): `HI` label top-left, the high score replaces the centred score in white (tiles 24..35, ink in both planes = colour 3), lives hidden.
-- Build: `.\build_gbc.ps1`, all checks pass, bank 0 code ends `$3712`. Not run in the emulator; user play-test pending.
-
-### 2026-11-01 - Camera dead zone (branch `gbc-port`)
-
-- `camera_follow` (`src/gbc/main.c`) holds the camera while the jet is within `GBC_CAM_DEAD` (12 px) of the view centre; beyond that it targets the position that puts the jet on the zone edge. Distance is measured from the unclamped centred camera (`player.x - GBC_CAM_JET_X`) so the pan still reaches 0 / `GBC_CAM_MAX_X`. READY, ATTRACT and WAIT paths unchanged.
-- `GBC_CAM_STEP` 2 to 1 px/frame: 2 felt hectic. The jet (1.5 px/frame at cruise) slowly outruns the camera on long holds; play-tested fine. User play-tested "just right". Build ok.
-
-### 2026-11-01 - Pacing: oam_camera trim, pass log (branch `perf-pacing`)
-
-- Added a -ProfExport per-pass ring (`pl_rec`, `tests/gb/pass_log.mjs`, `tests/gb/run_emu.ps1`): vsync() always waits for the next VBlank, so passes cost whole frames; baseline fast 0.69 passes/frame, clamps 6.
-- oam_camera by pointer (33 to 20 lines/pass), `-OamCheck` build compares with the old walk: 572 passes, 0 mismatches. Fast 0.76, clamps 5, cruise 1.00.
-- Rejected: player budget 3 to 2 (clamps 55), time governor on rows+job (0.83 / clamps 70-95), rows only (0.79 / 66). Old DMG benchmarks deleted.
-
-### 2026-11-01 - Sprite blink fix, pacing merged (branch `perf-pacing` into `gbc-port`)
-
-- Blinking sprites after the HUD-hide fix: the main loop re-enabled OBJ after vsync(), so an overrun pass left the next frame without sprites. Now `hud_show_sprites_isr` (add_VBL) does it. User play-tested: fine, slight stutter on busy late levels accepted. Remaining risk: OAM DMA can copy a half-written list if VBlank hits inside oam_camera (stage in a second buffer if it shows).
-
-### 2026-11-02 - Dual-target build restored (branch `gbc-port`, not yet merged)
-
-- `gbc-port` had replaced `<nes/nes.h>` with `<gb/gb.h>` in shared files, so `build.ps1` failed. Added `src/platform.h` (picks the SDK header by `__SDCC_sm83`) and used it in all shared files.
-- NES RAM was 8 bytes over: guarded GBC-only `river_clamps` / `river_owed_max`, and the `palette_color_t uint16_t` + palette no-op macros in `entities.c` (they doubled a local palette array and disabled NES palette calls). NES: 3 bytes free.
-- Verified: `build_gbc.ps1` ROM byte-identical before/after; `build.ps1` builds `river_raid.nes`. NES gameplay not re-tested.
-
-### 2026-11-02 - gbc-port merged into main
-
-- User confirmed all bugs play-tested and that some gbc-port changes are intended on every platform. Fast-forwarded `main`; both `build.ps1` and `build_gbc.ps1` verified from a clean checkout.
+- One ROM, header `$80`, `.\build_gbc.ps1` -> `roms/river_raid.gb`: the GBC game on a GBC (colour, double speed) and the DMG game on a DMG, chosen at boot (`gb_cgb`). `PLATFORM_DUAL` adds the CGB machinery to `PLATFORM_DMG`; `-Dmg`, `-GbcOnly` (old GBC-only) and `-River2600` (implies it) still build, and their hashes (`-GbcOnly` `5598B71F`, `-River2600` `09F504E0`, NES `C1D44CF0`) stayed identical, which proved every addition folds away. `-Dmg` rebaselined to `9EA404E4` for the `di`/`ei` change.
+- Design: both machines use the DMG layout and the delay queue (226 slots). GBC sprites and HUD stay in bank 1, `dmg_tile_map` is the identity there, one OAM byte serves both. GBC per-row attributes are written at job time, not queued: the map row is off screen at job time and at drain time. `river_vram_copy_asm` now runs the sample and both writes with interrupts off (a handler returning after the sample could drop the writes); Gearboy does not model the VRAM lockout, so that is reasoning only.
+- Tests (both machines): `-OamCheck`, `-RiverCheck` 0 errors; `host_river*`, `host_river_queue` pass (0 clobbers at 226, so the old GBC bottom-row bug should be gone: unconfirmed in play); `sprite_check`, `dmg_check` (now with HUD tiles), new `gbc_check` (bank-1 sprite tiles, HUD tiles and attribute map, OAM palette and bank, river attribute rows against the generator's road slot, colours against the old GBC ROM): pass, with negative controls that fail as they should. Fast flight: GBC 1.00 / 1.00 / 1.00, DMG 1.00 / 0.98 / 0.95. Bank 0 ends `$36F3`.
+- Tools: `run_emu.ps1` now takes `-Rom -Machine -Port`, confirms the machine and stops only its own PID; `mode_probe`, `gbc_check`, `collect_shots`, `montage`, `shots`, `png`. Gearboy runs a `$80` ROM as a DMG with `--portable` and `ForceDMG = true`.
+- Open: a rare white screenshot in DMG mode (state 3), not reproduced; nothing run on hardware. `roms/` cleaned: only `river_raid.gb/.ihx/.map/.noi`, the NES ROM, `roms/ref/` and the saves remain.
