@@ -15,26 +15,39 @@ Started 2026-11-02, branch `dmg-exact`. An experiment: `river-2600` stays as the
 - **Do not merge to `main`** and do not touch `river-2600`: the user decides both.
 - **A shared mistake passes a self-comparison** (`info/LESSONS.md` item 18): run `tests/gb/sprite_check.mjs` and look at a screenshot before any handover.
 
-## Tile budget (counted 2026-11-02; the river line is an old figure)
+## Tile budget (river measured 2026-11-02, task 1)
 
 Hardware: 384 tiles in three blocks of 128. Sprites reach `$8000` and `$8800`; BG and window (with LCDC bit 4 clear) reach `$9000` and `$8800`. So BG + window <= 256, sprites <= 256, and `$8800` is the only shared block.
 
 | Use | Tiles | Source |
 |---|---|---|
-| Fixed river tiles | 3 | `TILE_RIVER_BASE` |
-| River cache peak | **182** | Archive figure, **not re-measured**; the cache has 250 slots |
+| Fixed river tiles | 3 | `TILE_RIVER_BASE` (land, water, black; the road tiles 253/254 are margins, unused on GB) |
 | HUD (window) | 36 | `HT_COUNT` in `hud_gbc.c` |
 | Sprites | 167 | Jet 6, cursor 1, entities 141, debris 10, missile 1, pause letters 8 |
-| **Total** | **388 of 384** | 4 over, with no margin |
+| **Left for the river cache** | **178** | |
+| The cache as it works today | **259-266** | **Does not fit** (task 1). The old "182" was the 18-row window, not the real lifetime |
 
-Likely savings without visible loss: idle high score's 12 tiles (white digits, HI), pause letters shared with HUD glyphs through `$8800`, duplicate or blank entity tiles. A smaller cache may be enough (task 1).
+Savings without visible change: **38 of the 141 entity tiles are exact duplicates** (4 blank), which leaves 216 for the cache (the BG side caps it at 217). Needs a tile index table in `ent_draw`/`ent_draw_asm`, today `first + offset`. Also possible: 10 of the 12 idle high score tiles (one digit set; a small look change).
 
 ## Tasks, in order
 
 ### 1. Measure what the river really needs (host only, decides everything else)
-- [ ] `tests/host/tiles_main.c` counts a "clobber" for a tile reused while its row is still in the 32-row map. The reports seen so far say "written 27 rows ago", probably off screen and harmless. Change or extend it to count only rows that can be on screen. The view is 128 lines (16 rows, 17 with the scroll phase); check how far ahead of the view new rows are written.
-- [ ] Make the cache size a build parameter on the host (`TILE_RIVER_COUNT`; check `RIVER_ALLOC` wrap and the ids), and find the smallest size with no on-screen clobber: exact river with features, all 4 start levels, 20,000+ tile rows, `-JobCols 10` as on the GBC.
-- [ ] Write the result in the table above and tell the user. **The decision here is the user's if it does not fit:** simplify trees and houses, drop some sprite art, or fall back to the blocky river. Fitting needs about 180 cache slots or fewer after the HUD and trimmed sprites.
+- [x] New harness `tests/host_tile_budget.ps1` + `tests/host/tile_budget_main.c`: the real spawner (so roads and object avoidance are in the river, unlike `tiles_main.c`), the main loop's schedule, cache size as a parameter (`-Cache`).
+- [x] **Geometry finding.** `publish_pass` sets `SCY = scroll + 82`, because logic keeps NES coordinates and the view is the bottom 128 of 210 lines. A row is written at `scroll - 16`, so **98 px above the view top**, and lives 226 px (28 tile rows) from upload to leaving the bottom. "Written 27 rows ago" is therefore **on screen**: the bottom ~10 px.
+- [x] Measured: 60,000 tile rows, 4 start levels, `-JobCols 10`, fast. Cruise and slow give the same or less (20,000 rows). Pacing jitter (every 20th or 7th pass taking 2 frames) does not raise it. Runs above 65,535 rows are invalid (`river_distance` wraps; the script refuses them).
+
+  | Upload delayed so the row is written ... | `view_off` | Slots needed, lag 0 / 2 / 6 px | If tiles were shared across rows |
+  |---|---|---|---|
+  | As today, 98 px above the view | 82 | **259-266** | 225-244 |
+  | 56 px above | 40 | 216 / 222 / 223 | 189-198 |
+  | 32 px above | 16 | 200 / 206 / 206 | 165-179 |
+  | 24 px above | 8 | 193 / 200 / 200 | 159-170 |
+  | 16 px above | 0 | 186 / 193 / 193 | 152-165 |
+
+  Lag is how far the shown scroll trails the logic when an upload lands (a pass publishes at its end; 1.5 px/frame at fast, so 2 is typical, 6 is 4 frames late).
+- [x] **Independent check:** the real allocator with the clobber test decided from map row and SCY alone goes from >0 to exactly 0 at the predicted size, in all 6 cases tried (216, 223, 200, 206, 186, 193) on all 4 starts.
+- [x] **The shipped caches have this too:** at 250 slots and `view_off` 82: 67-151 clobbered cells per 60,000 rows, age 27-28 rows, in the bottom ~10 px. Rare and brief; nobody has reported it. A finding only, not fixed here.
+- Queue size if uploads are delayed (peak uploads in q consecutive tile rows): q8 91, q9 98, q10 108, q11 118, q12 127 tiles. WRAM has ~6 KB free in the exact build (`s__HEAP` `$C674`; `$D000` holds the OAM page).
 
 ### 2. VRAM layout
 - [ ] Decide the map of ids. Today river ids are 3..252, HUD ids 0..35 in VRAM bank 1, sprite ids 64..247 in bank 1. Suggested: sprites fill `$8000` and spill into `$8800`; the river cache takes `$9000` and what is left of `$8800`, so its slot numbers are no longer one contiguous range.

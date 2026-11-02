@@ -126,7 +126,9 @@
 #define TILE_WATER              1u
 #define TILE_BLACK              2u      /* solid black: the empty world at game start */
 #define TILE_RIVER_BASE         3u
+#ifndef TILE_RIVER_COUNT                /* tests/host_tile_budget.ps1 sets its own */
 #define TILE_RIVER_COUNT        250u    /* exact per-row river cache */
+#endif
 /* Solid road tiles for the land margins beside the river (columns 0-3 and
  * 28-31) in the two tile rows of a road.  A road is 16 scanlines, the grey
  * body with a yellow centre line; the Atari recolours the land per scanline,
