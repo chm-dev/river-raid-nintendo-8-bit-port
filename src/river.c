@@ -572,6 +572,26 @@ static void river_clear_row(void) {
 }
 #endif
 
+#ifdef __SDCC_sm83
+static void river_fill_core(void) {
+    __asm
+        ld      a, (_rg_row_pos)
+        add     a, #<_river_raw_row
+        ld      l, a
+        adc     a, #>_river_raw_row
+        sub     a, l
+        ld      h, a
+        ld      a, (_rf_cnt)
+        ld      b, a
+        ld      a, (_rf_val)
+    1$:
+        ld      (hl+), a
+        dec     b
+        jr      NZ, 1$
+    __endasm;
+}
+#endif
+
 /* Fill y+1 bytes of the raw row at rg_row_pos with `value`, then advance the
  * position by y (the original's fills overlap by one byte). */
 static void river_fill(uint8_t y, uint8_t value) {
@@ -583,13 +603,13 @@ static void river_fill(uint8_t y, uint8_t value) {
     }
     rf_val = value;
     rf_cnt = (uint8_t)(y + 1u);
-#ifdef __SDCC_mos6502
+#if defined(__SDCC_mos6502) || defined(__SDCC_sm83)
     /* the row clear already wrote land and the fills only move forward */
     if (value != 0x55u) {
         river_fill_core();
     }
 #else
-    {
+    if (value != 0x55u) {
         uint8_t i;
         for (i = 0; i <= y; i++) {
             river_raw_row[rg_row_pos + i] = value;
@@ -1425,8 +1445,169 @@ static const uint8_t *rc_src;
 static uint8_t *rc_kp;
 static uint8_t rc_line;
 
-/* Stop at the next column that needs pattern bytes (or at the end). */
+#ifdef __SDCC_sm83
+/* HL = source (2 bytes per column), DE = column kind, C = the solid kind this column would be.
+ * The array is under 256 bytes, so the low byte of its end is enough to find the end. */
 static void river_scan_solid(void) {
+    __asm
+        ld      a, (_rc_src)
+        ld      l, a
+        ld      a, (_rc_src + 1)
+        ld      h, a
+        ld      a, (_rc_kp)
+        ld      e, a
+        ld      a, (_rc_kp + 1)
+        ld      d, a
+    1$:
+        ld      a, e
+        cp      a, #<(_river_col_kind + 24)
+        jr      Z, 9$
+        ld      a, (hl+)
+        ld      c, a
+        ld      a, (hl-)
+        cp      a, c
+        jr      NZ, 9$
+        ld      c, #1
+        cp      a, #0x55
+        jr      Z, 2$
+        inc     c
+        inc     a                   ; 0xFF?
+        jr      NZ, 9$
+    2$:
+        ld      a, (de)
+        cp      a, c
+        jr      Z, 3$
+        cp      a, #3
+        jr      NZ, 9$
+        ld      a, c
+        ld      (de), a
+    3$:
+        inc     hl
+        inc     hl
+        inc     de
+        jr      1$
+    9$:
+        ld      a, l
+        ld      (_rc_src), a
+        ld      a, h
+        ld      (_rc_src + 1), a
+        ld      a, e
+        ld      (_rc_kp), a
+        ld      a, d
+        ld      (_rc_kp + 1), a
+    __endasm;
+}
+
+/* river_lut_p1 must directly follow river_lut_p0 (river_lut.h: inc h steps from one to the
+ * other); -RiverCheck would show it if it did not. */
+static void river_mixed_col(void) {
+    __asm
+        ld      a, (_rc_kp)
+        ld      e, a
+        ld      a, (_rc_kp + 1)
+        ld      d, a
+        ld      a, e
+        sub     a, #<_river_col_kind
+        ld      l, a
+        ld      h, #0
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        add     hl, hl
+        ld      a, (_rc_line)
+        add     a, a
+        ld      c, a
+        ld      b, #0
+        add     hl, bc
+        ld      bc, #_river_tile_pat
+        add     hl, bc              ; HL = pattern bytes of this column and line
+        ld      a, (de)
+        or      a, a
+        jr      Z, 3$
+        ld      c, a
+        xor     a, a
+        ld      (de), a             ; mixed from now on
+        ld      a, c
+        cp      a, #3
+        jr      Z, 3$
+        ld      c, #0               ; solid so far: fill in the lines already done
+        cp      a, #2
+        jr      NZ, 1$
+        ld      c, #0xFF
+    1$:
+        ld      a, (_rc_line)
+        cpl
+        add     a, #8               ; 7 - line
+        jr      Z, 3$
+        ld      b, a
+        push    hl
+        inc     hl
+        inc     hl
+    2$:
+        ld      a, #0xFF
+        ld      (hl+), a
+        ld      a, c
+        ld      (hl+), a
+        dec     b
+        jr      NZ, 2$
+        pop     hl
+    3$:
+        ld      e, l
+        ld      d, h                ; DE = destination
+        ld      a, (_rc_src)
+        ld      c, a
+        ld      a, (_rc_src + 1)
+        ld      b, a
+        ld      a, (bc)
+        ld      l, a
+        inc     bc
+        ld      a, (bc)
+        ld      c, a                ; C = second raw byte
+        ld      a, l                ; first raw byte
+        add     a, #<_river_lut_p0
+        ld      l, a
+        adc     a, #>_river_lut_p0
+        sub     a, l
+        ld      h, a
+        ld      b, (hl)             ; p0[b0]
+        inc     h
+        ld      a, (hl)             ; p1[b0]
+        swap    a
+        inc     de
+        ld      (de), a
+        dec     de
+        ld      a, b
+        swap    a
+        ld      b, a
+        ld      a, c
+        add     a, #<_river_lut_p0
+        ld      l, a
+        adc     a, #>_river_lut_p0
+        sub     a, l
+        ld      h, a
+        ld      a, (hl)             ; p0[b1]
+        or      a, b
+        ld      (de), a
+        inc     de
+        inc     h
+        ld      a, (de)
+        or      a, (hl)             ; p1[b1]
+        ld      (de), a
+    __endasm;
+}
+#define RIVER_CONVERT_ASM
+#endif
+
+#if !defined(RIVER_CONVERT_ASM) || defined(PROF_RIVERCHECK)
+#ifdef RIVER_CONVERT_ASM
+#define river_scan_solid_c_name river_scan_solid_c
+#define river_mixed_col_c_name  river_mixed_col_c
+#else
+#define river_scan_solid_c_name river_scan_solid
+#define river_mixed_col_c_name  river_mixed_col
+#endif
+/* Stop at the next column that needs pattern bytes (or at the end). */
+static void river_scan_solid_c_name(void) {
     const uint8_t *src = rc_src;
     uint8_t *kp = rc_kp;
     uint8_t k;
@@ -1451,7 +1632,7 @@ static void river_scan_solid(void) {
     rc_kp = kp;
 }
 
-static void river_mixed_col(void) {
+static void river_mixed_col_c_name(void) {
     uint8_t *dst = &river_tile_pat[(((uint16_t)(rc_kp - river_col_kind)) << 4) + (uint8_t)(rc_line << 1)];
     uint8_t k = *rc_kp;
     uint8_t b0;
@@ -1473,6 +1654,7 @@ static void river_mixed_col(void) {
     dst[0] = (uint8_t)((river_lut_p0[b0] << 4) | river_lut_p0[k]);
     dst[1] = (uint8_t)((river_lut_p1[b0] << 4) | river_lut_p1[k]);
 }
+#endif
 
 static void river_convert_row_c(uint8_t line) {
     rc_line = line;
@@ -1488,6 +1670,53 @@ static void river_convert_row_c(uint8_t line) {
         rc_src += 2;
     }
 }
+
+#ifdef PROF_RIVERCHECK
+/* -RiverCheck ROM: every row goes through the assembly and the C from the same state, and the
+ * results must match (the host harness only ever runs the C). */
+uint16_t rchk_rows, rchk_err;
+static uint8_t rchk_kind[RIVER_TILE_COLS];
+static uint8_t rchk_pat[RIVER_TILE_COLS * 16];
+static uint8_t rchk_kind2[RIVER_TILE_COLS];
+static uint8_t rchk_pat2[RIVER_TILE_COLS * 16];
+
+static void rchk_save(void) {
+    memcpy(rchk_kind, river_col_kind, sizeof rchk_kind);
+    memcpy(rchk_pat, river_tile_pat, sizeof rchk_pat);
+}
+
+/* The asm has run: keep its result, go back to the saved state. */
+static void rchk_swap(void) {
+    memcpy(rchk_kind2, river_col_kind, sizeof rchk_kind);
+    memcpy(rchk_pat2, river_tile_pat, sizeof rchk_pat);
+    memcpy(river_col_kind, rchk_kind, sizeof rchk_kind);
+    memcpy(river_tile_pat, rchk_pat, sizeof rchk_pat);
+}
+
+/* The C has run: compare.  Bytes of solid columns are never used, but both write the same. */
+static void rchk_compare(void) {
+    rchk_rows++;
+    if (memcmp(rchk_kind2, river_col_kind, sizeof rchk_kind) != 0 ||
+        memcmp(rchk_pat2, river_tile_pat, sizeof rchk_pat) != 0) {
+        rchk_err++;
+    }
+}
+
+static void river_convert_row_ref(uint8_t line) {
+    rc_line = line;
+    rc_src = river_raw_row;
+    rc_kp = river_col_kind;
+    for (;;) {
+        river_scan_solid_c();
+        if (rc_kp == &river_col_kind[RIVER_TILE_COLS]) {
+            return;
+        }
+        river_mixed_col_c();
+        rc_kp++;
+        rc_src += 2;
+    }
+}
+#endif
 #endif
 
 static uint8_t rc_off, rc_sx, rc_cc, rc_t0, rc_t1;
@@ -1633,6 +1862,12 @@ static void river_convert_row(uint8_t line) {
         jmp     8$
     99$:
     __endasm;
+#elif defined(PROF_RIVERCHECK)
+    rchk_save();
+    river_convert_row_c(line);
+    rchk_swap();
+    river_convert_row_ref(line);
+    rchk_compare();
 #else
     river_convert_row_c(line);
 #endif
@@ -1641,7 +1876,55 @@ static void river_convert_row(uint8_t line) {
 /* The current raw row equals the previous one (rg_same), which was converted
  * into line + 1 of the same tile row: copy that scanline of the mixed columns (a
  * solid column has no bytes and stays solid).  line <= 6. */
+#ifdef __SDCC_sm83
+/* DE = column kind, HL = this column's line, BC = stride. */
+static void river_copy_line_asm(void) {
+    __asm
+        ld      a, (_rc_off)
+        ld      l, a
+        ld      h, #0
+        ld      bc, #_river_tile_pat
+        add     hl, bc
+        ld      de, #_river_col_kind
+        ld      bc, #16
+    1$:
+        ld      a, (de)
+        or      a, a
+        jr      NZ, 2$
+        push    de
+        ld      e, l
+        ld      d, h
+        inc     hl
+        inc     hl
+        ld      a, (hl+)
+        ld      (de), a
+        inc     de
+        ld      a, (hl-)
+        ld      (de), a
+        dec     hl
+        dec     hl
+        pop     de
+    2$:
+        add     hl, bc
+        inc     de
+        ld      a, e
+        cp      a, #<(_river_col_kind + 24)
+        jr      NZ, 1$
+    __endasm;
+}
+#endif
+
 static void river_copy_line(uint8_t line) {
+#ifdef PROF_RIVERCHECK
+    rc_off = (uint8_t)(line << 1);
+    rchk_save();
+    river_copy_line_asm();
+    rchk_swap();
+#elif defined(__SDCC_sm83)
+    rc_off = (uint8_t)(line << 1);
+    river_copy_line_asm();
+#endif
+#if !defined(__SDCC_sm83) || defined(PROF_RIVERCHECK)
 #ifdef __SDCC_mos6502
     rc_off = (uint8_t)(line << 1);
     __asm
@@ -1691,9 +1974,46 @@ static void river_copy_line(uint8_t line) {
         }
     }
 #endif
+#endif
+#ifdef PROF_RIVERCHECK
+    rchk_compare();
+#endif
 }
 
-#ifndef __SDCC_mos6502
+#ifdef __SDCC_sm83
+static uint8_t rj_eq;
+
+/* rj_eq = the 16 bytes at rj_pc and rj_pk are the same. */
+static void river_pat_equal_asm(void) {
+    __asm
+        ld      a, (_rj_pc)
+        ld      e, a
+        ld      a, (_rj_pc + 1)
+        ld      d, a
+        ld      a, (_rj_pk)
+        ld      l, a
+        ld      a, (_rj_pk + 1)
+        ld      h, a
+        ld      c, #16
+    1$:
+        ld      a, (de)
+        cp      a, (hl)
+        jr      NZ, 2$
+        inc     de
+        inc     hl
+        dec     c
+        jr      NZ, 1$
+        ld      a, #1
+        jr      3$
+    2$:
+        xor     a, a
+    3$:
+        ld      (_rj_eq), a
+    __endasm;
+}
+#endif
+
+#if !defined(__SDCC_mos6502) && (!defined(__SDCC_sm83) || defined(PROF_RIVERCHECK))
 static uint8_t river_pat_equal(const uint8_t *a, const uint8_t *b) {
     uint8_t i;
 
@@ -2184,7 +2504,17 @@ static void river_find_dup(void) {
             continue;
         }
         rj_pk = &river_tile_pat[(uint16_t)rj_k * 16u];
+#ifdef __SDCC_sm83
+        river_pat_equal_asm();
+#ifdef PROF_RIVERCHECK
+        if (rj_eq != river_pat_equal(rj_pc, rj_pk)) {
+            rchk_err++;
+        }
+#endif
+        if (rj_eq) {
+#else
         if (river_pat_equal(rj_pc, rj_pk)) {
+#endif
             rj_id = river_row_ids[rj_k];
             break;
         }

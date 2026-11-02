@@ -21,3 +21,12 @@ Append-only. Do not read whole; grep for a keyword and read the matching `### da
 
 - The user played `roms/river_raid_2600_slow.gb` (single-speed proxy): "almost acceptable but still not there"; the blocky look is disliked. Assessment of the remaining room (no code changed): entities+player ~40% of a pass, river ~21%, `oam_camera` ~12%.
 - Added Stage 1b to `PLAN_2600.md` (8 ordered steps, results table), the "smooth blocky edges" idea to `BUGS&FEATS.md` (parked), `tools/resolve_sub.py` (names profiler `SUB_` entries), and rewrote HANDOFF next steps.
+
+### 2026-11-02 - Stage 1b: DMG-clock performance, gates met (branch `river-2600`)
+
+- Fast flight at the DMG proxy 0.57 -> 0.99 passes/frame, double speed 0.97 -> 1.00, default exact ROM 0.76 -> 1.00 (10 s windows; proxy start indexes 0/2/3 all 0.99, clamps 0/2/1). Work per pass 82k -> 36k units.
+- New tools: `tests/gb/trace_prof.mjs` + `tools/trace_hist.py` (cycle-exact trace, per phase and worst passes; the profiler charges banked bodies to `.call_hl`), `tools/prof_summary.py`, `-PassLog` split from `-ProfExport`, `GB_START_LEVEL`.
+- Cuts: HUD returns when its inputs are unchanged (8k per pass); entity rows above the view not drawn; missile search behind a flag; `oam_camera` walks live slots; river convert/copy use the NES solid-column scheme in C (the GBC ran a slow reference version); inline stripe write.
+- Pacing: `vsync()` made pass time a step function. A finished pass now publishes scroll and a double-buffered OAM page to the VBlank handler; the next pass starts at once after an overrun.
+- User lifted the no-assembly gate: sm83 for `oam_camera`, entity draw/emit/follow/scan and river scan/mixed/copy/compare/fill, each checked against its C (`-OamCheck`, `-RiverCheck`: 0 errors). The plan's bcall-overhead estimate was wrong: ~1% of time.
+- Tests: host_river_fast 20000 rows x 4 identical, host_river -Blocky and exact match, golden diff against the previous commit identical, NES builds (3 bytes free). Playtest pending: `roms/river_raid_2600_slow.gb`.
