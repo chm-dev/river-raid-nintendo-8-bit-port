@@ -2358,10 +2358,13 @@ extern uint16_t rchk_err;
 #endif
 
 /* Copy rq_n bytes (even) from rq_src to VRAM at rq_dst; a C loop with a STAT test per byte cost
- * 3.8k units per tile, this 1.8k with the wait.  At single speed two writes fit per test: !BUSY
- * means mode 0 or 1 and mode 2 leaves VRAM open for 20 M-cycles more, and the second write is 16
- * after the sample.  No interrupt lands between: the LCD handler returns in HBlank, the VBlank
- * handler in VBlank.  DE = source, HL = destination, B = pairs. */
+ * 3.8k units per tile, this 1.8k with the wait.  Two writes fit per test: !BUSY means mode 0 or 1
+ * and mode 2 leaves VRAM open for 80 dots more, and the second write is 16 M-cycles after the
+ * sample: 64 dots at single speed, 32 at double.  An interrupt between the sample and the writes
+ * would break that (the LCD handler returns tens of M-cycles after it saw HBlank, longer than the
+ * shortest HBlank), so interrupts are off from the sample to the second write and on again between
+ * attempts, which keeps the handlers at most 16 M-cycles late.  Every caller runs with interrupts on.
+ * DE = source, HL = destination, B = pairs. */
 static void river_vram_copy_asm(void) {
     __asm
         ld      a, (_rq_n)
@@ -2376,15 +2379,22 @@ static void river_vram_copy_asm(void) {
         ld      a, (_rq_dst + 1)
         ld      h, a
     1$:
+        di
+#ifndef PROF_RQ_NOWAIT              /* negative control for -RiverCheck: the writes go without the wait */
         ldh     a, (_STAT_REG)
         and     a, #2               ; STATF_BUSY
-        jr      NZ, 1$
+        jr      Z, 2$
+        ei
+        jr      1$
+    2$:
+#endif
         ld      a, (de)
         inc     de
         ld      (hl+), a
         ld      a, (de)
         inc     de
         ld      (hl+), a
+        ei
         dec     b
         jr      NZ, 1$
     __endasm;
@@ -2395,14 +2405,23 @@ typedef char rq_copy_consts[(STATF_BUSY == 2u) ? 1 : -1];
 static void river_vram_copy(void) {
     river_vram_copy_asm();
 #ifdef PROF_RIVERCHECK
+#ifdef PROF_RQ_FLIP                 /* negative control: one wrong byte in VRAM must be counted */
+    while (STAT_REG & STATF_BUSY) {
+    }
+    *(volatile uint8_t *)rq_dst ^= 1u;
+#endif
     {
         const uint8_t *s = rq_src, *d = rq_dst;
 
         for (; rq_n != 0u; rq_n--, s++, d++) {
             while (STAT_REG & STATF_BUSY) {
             }
-            if (*d != *s) {
-                rchk_err++;
+            if (*d != *s) {         /* a read that lands in mode 3 gives $FF: look again */
+                while (STAT_REG & STATF_BUSY) {
+                }
+                if (*d != *s) {
+                    rchk_err++;
+                }
             }
         }
     }
