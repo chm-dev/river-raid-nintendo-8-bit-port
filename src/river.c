@@ -1416,39 +1416,76 @@ static void river_cache_init(void) {
  * scanline (two plane bytes) of each of the 20 pending 8x8 tiles.  Each
  * source byte is 4 pixels, so a nibble LUT per plane replaces the bit loop. */
 #ifndef __SDCC_mos6502
-/* Reference C version of river_convert_row, used by the host harness. */
-static void river_convert_row_c(uint8_t line) {
-    uint8_t *dst = &river_tile_pat[line * 2u];
-    const uint8_t *src = &river_raw_row[0];
-    uint8_t c, b0, b1, p0, p1, k;
+/* C version of river_convert_row (GBC and the host harness), the same scheme as the
+ * NES assembly below: a solid column that stays solid writes nothing, and when one
+ * stops being solid the lines already done are filled in (lines run 7 down to 0).
+ * Two small functions with file-scope state because SDCC spills everything to the
+ * stack in one big one, and most columns only need the scan. */
+static const uint8_t *rc_src;
+static uint8_t *rc_kp;
+static uint8_t rc_line;
 
-    for (c = 0; c < RIVER_TILE_COLS; c++) {
-        b0 = src[0];
-        b1 = src[1];
-        if (b0 == b1 && b0 == 0x55u) {
-            /* four land pixels twice: the dominant case, no LUT needed */
-            p0 = 0xFFu;
-            p1 = 0u;
-            k = 1u;
-        } else if (b0 == b1 && b0 == 0xFFu) {
-            p0 = 0xFFu;
-            p1 = 0xFFu;
-            k = 2u;
-        } else {
-            p0 = (uint8_t)((river_lut_p0[b0] << 4) | river_lut_p0[b1]);
-            p1 = (uint8_t)((river_lut_p1[b0] << 4) | river_lut_p1[b1]);
-            k = 0u;
-            if (p0 == 0xFFu) {
-                k = (p1 == 0u) ? 1u : ((p1 == 0xFFu) ? 2u : 0u);
+/* Stop at the next column that needs pattern bytes (or at the end). */
+static void river_scan_solid(void) {
+    const uint8_t *src = rc_src;
+    uint8_t *kp = rc_kp;
+    uint8_t k;
+
+    for (; kp != &river_col_kind[RIVER_TILE_COLS]; kp++, src += 2) {
+        k = *src;
+        if (k != src[1]) {
+            break;
+        }
+        k = (k == 0x55u) ? 1u : (k == 0xFFu) ? 2u : 0u;
+        if (k == 0u) {
+            break;
+        }
+        if (*kp != k) {
+            if (*kp != 3u) {
+                break;
+            }
+            *kp = k;
+        }
+    }
+    rc_src = src;
+    rc_kp = kp;
+}
+
+static void river_mixed_col(void) {
+    uint8_t *dst = &river_tile_pat[(((uint16_t)(rc_kp - river_col_kind)) << 4) + (uint8_t)(rc_line << 1)];
+    uint8_t k = *rc_kp;
+    uint8_t b0;
+
+    if (k != 0u) {
+        if (k != 3u) {
+            uint8_t *p = dst + 2;
+            uint8_t v = (k == 2u) ? 0xFFu : 0u;
+
+            for (k = (uint8_t)(7u - rc_line); k != 0u; k--) {
+                *p++ = 0xFFu;
+                *p++ = v;
             }
         }
-        dst[0] = p0;
-        dst[1] = p1;
-        /* river_col_kind starts at 3 for each tile row; AND-ing keeps only
-         * the solid kind (land 1 / water 2) shared by all eight lines. */
-        river_col_kind[c] &= k;
-        dst += 16;
-        src += 2;
+        *rc_kp = 0u;
+    }
+    b0 = rc_src[0];
+    k = rc_src[1];
+    dst[0] = (uint8_t)((river_lut_p0[b0] << 4) | river_lut_p0[k]);
+    dst[1] = (uint8_t)((river_lut_p1[b0] << 4) | river_lut_p1[k]);
+}
+
+static void river_convert_row_c(uint8_t line) {
+    rc_line = line;
+    rc_src = river_raw_row;
+    rc_kp = river_col_kind;
+    for (;;) {
+        river_scan_solid();
+        if (rc_kp == &river_col_kind[RIVER_TILE_COLS]) {
+            return;
+        }
+        river_mixed_col();
+        rc_kp++;
+        rc_src += 2;
     }
 }
 #endif
@@ -1643,11 +1680,15 @@ static void river_copy_line(uint8_t line) {
         bne     3$
     __endasm;
 #else
-    uint8_t c;
+    const uint8_t *kp;
 
-    for (c = 0; c < RIVER_TILE_COLS; c++) {
-        river_tile_pat[c * 16u + line * 2u] = river_tile_pat[c * 16u + line * 2u + 2u];
-        river_tile_pat[c * 16u + line * 2u + 1u] = river_tile_pat[c * 16u + line * 2u + 3u];
+    for (kp = river_col_kind; kp != &river_col_kind[RIVER_TILE_COLS]; kp++) {
+        if (*kp == 0u) {
+            uint8_t *p = &river_tile_pat[(((uint16_t)(kp - river_col_kind)) << 4) + (uint8_t)(line * 2u)];
+
+            p[0] = p[2];
+            p[1] = p[3];
+        }
     }
 #endif
 }
@@ -2082,9 +2123,25 @@ static uint8_t river_emit_stripe(void) {
     rj_addr = (uint16_t)(PPU_NT1_BASE + ((uint16_t)river_pending_slot << 5));
     rj_addr += RIVER_LEFT_COL;
     if (!river_live) {
+#ifdef __SDCC_sm83
+        {
+            /* set_vram_byte's own wait inline: ~230 units per cell through the call,
+             * ~60 here.  Mode 2 follows mode 0 and leaves VRAM open too, so the few
+             * cycles between the test and the write are safe. */
+            uint8_t *d = (uint8_t *)rj_addr;
+            const uint8_t *s = river_row_ids;
+
+            for (rj_n = RIVER_TILE_COLS; rj_n != 0u; rj_n--) {
+                while (STAT_REG & STATF_BUSY) {
+                }
+                *d++ = *s++;
+            }
+        }
+#else
         for (rj_n = 0; rj_n < RIVER_TILE_COLS; rj_n++) {
             set_vram_byte((uint8_t *)(rj_addr + rj_n), river_row_ids[rj_n]);
         }
+#endif
 #ifdef __SDCC_sm83
         /* Colour: the BG attribute (VRAM bank 1) of this map row, written only
          * when it changes (land flips and road rows are rare). */
@@ -2397,10 +2454,8 @@ static void river_atlas_build(void) {
 /* Jumps of one recorded edge (rows 3 and 7), or 0 when it moves anywhere else or by more than a
  * slope-2 step.  Sets af_j1/af_j2. */
 static uint8_t river_edge_jumps(const uint8_t *e) {
-    for (af_k = 1u; af_k < 8u; af_k++) {
-        if (af_k != 3u && af_k != 7u && e[af_k] != e[af_k - 1u]) {
-            return 0u;
-        }
+    if (e[1] != e[0] || e[2] != e[0] || e[4] != e[3] || e[5] != e[3] || e[6] != e[3]) {
+        return 0u;
     }
     af_j1 = (int16_t)e[3] - (int16_t)e[2];
     af_j2 = (int16_t)e[7] - (int16_t)e[6];
@@ -2427,7 +2482,7 @@ static uint8_t river_band_regular(void) {
     af_jR2 = af_j2;
     af_lmin = af_lmax = rb_L[0];
     af_rmin = af_rmax = rb_R[0];
-    for (af_k = 1u; af_k < 8u; af_k++) {
+    for (af_k = 3u; af_k < 8u; af_k += 4u) {    /* the edges only move at rows 3 and 7 */
         if ((int16_t)rb_L[af_k] < af_lmin) af_lmin = rb_L[af_k];
         if ((int16_t)rb_L[af_k] > af_lmax) af_lmax = rb_L[af_k];
         if ((int16_t)rb_R[af_k] < af_rmin) af_rmin = rb_R[af_k];
