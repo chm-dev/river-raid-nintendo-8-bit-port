@@ -1,10 +1,11 @@
-# AGENTS.md — GBC port workspace rules
+# AGENTS.md — Game Boy port workspace rules
 
-Stable rules only. Status lives in `HANDOFF.md`; the roadmap is `GBC_PORT_PLAN.md`.
+Stable rules only. Status lives in `HANDOFF.md`.
 
 ## Project status
 - **Read `HANDOFF.md` first.** Short and current: where we are, next steps, decisions not to reopen, where to look.
-- **`PLAN_2600.md` is the working plan:** task checklists, gates and baseline numbers for the 2600 river mode. The decision text and risks are in `docs/PROPOSAL_2600_RIVER_MODE.md`.
+- **`PLAN_DMG.md` is the working plan:** the exact river on DMG (branch `dmg-exact`), tasks, tile budget, gates.
+- **`PLAN_2600.md` is the parked 2600 river mode** and holds the performance findings of Stage 1b. The decision text and risks are in `docs/PROPOSAL_2600_RIVER_MODE.md`.
 - **GBC history is in `archive/gbc/`** (old HANDOFF, PROGRESS, GBC_PORT_PLAN, BUGS&FEATS: architecture, baseline measurements, build and emulator notes). Open it only when needed.
 - **`PROGRESS.md` is append-only history.** Do not read it whole. Grep it for a keyword and read only the matching `### date - title` entry.
 - **NES history is in `archive/nes/`** (old HANDOFF, PROGRESS, PORTING_PLAN, BUGS&FEATS, Mesen notes, NES AGENTS and LESSONS). Open it only when a specific NES reference is needed. Nothing there is required reading.
@@ -12,7 +13,7 @@ Stable rules only. Status lives in `HANDOFF.md`; the roadmap is `GBC_PORT_PLAN.m
 
 ## Project overview
 Port of the Atari 8-bit **River Raid** (`xex/River Raid (1983)(Activision)(US)[a3].xex`) to the **Game Boy Color** in C, using GBDK-2020 v4.5.0 (`./gbdk`).
-- **GBC only.** DMG and Game Boy Pocket are not targets.
+- **GBC is the finished target; DMG is an experiment** (`PLAN_DMG.md`, user, 2026-11-02). Keep the GBC ROMs working and DMG code behind its own flag.
 - **Prototype first:** reuse the existing C code and decide on a playtest go/no-go after milestone 2. Hand-written sm83 is allowed where it pays (user, 2026-11-02); keep the C version as the reference for a byte-for-byte check (`build_gbc.ps1 -OamCheck`, `-RiverCheck`).
 - **Atari ground truth:** `docs/ATARI_RE_SPEC.md`, `docs/atari_disasm_*.txt`, `assets/atari/extracted/`. The shared river generator is `tools/river_model.py` and `src/river.c`.
 - **Logic coordinates:** game logic stays in NES-era coordinates (X = Atari HPOS, Y = NES scanlines 30..239). Only drawing goes through a camera.
@@ -56,6 +57,6 @@ Gearboy is the GB/GBC emulator with an MCP server. The folder is gitignored and 
 ## Workflow
 - **The user runs the playtests.** Build the ROM, then hand over a checklist. Do not drive the emulator to confirm gameplay fixes.
 - **Bugs and features:** `BUGS&FEATS.md`. Mark a fix `[~]` until the user confirms it in play, then `[x]`.
-- **Branches:** work on `main`. Branch only for risky or throwaway experiments, never a scratch copy of the tree. The 2600 river mode lives on `river-2600` until the Stage 1 check.
+- **Branches:** work on `main`. Branch only for risky or throwaway experiments, never a scratch copy of the tree. The 2600 river mode and the Stage 1b performance work are on `river-2600`, kept as the fallback; the DMG experiment is on `dmg-exact`. Merging either to `main` is the user's call.
 - **Never push.** Commit locally and stop; the user pushes to origin themselves. Do not run `git push`.
 - **Session end:** the steps are at the bottom of `HANDOFF.md`. Do not edit `AGENTS.md` for status.

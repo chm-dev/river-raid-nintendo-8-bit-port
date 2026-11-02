@@ -1,6 +1,6 @@
 # PROPOSAL — 2600-style river mode (NOT APPROVED)
 
-**Status: Stage 1 started 2026-11-02 (see "Decision"); Stage 2 and the DMG commitment are not approved. Drafted 2026-11-01, amended the same day.**
+**Status: Stage 1 and 1b done on `river-2600`, then parked on 2026-11-02: the user is trying the exact river on DMG first (`PLAN_DMG.md`). "DMG: 2600 is the only mode" and the CPU claims under Motivation predate Stage 1b. Stage 2 and the DMG commitment are not approved. Drafted 2026-11-01.**
 
 **Agents: Stage 1 work is authorised** (branch `river-2600`, tasks in `PLAN_2600.md`). Do not start Stage 2, set gate values, or touch `main` because of this file until the user records it in the "Decision" section at the bottom.
 
