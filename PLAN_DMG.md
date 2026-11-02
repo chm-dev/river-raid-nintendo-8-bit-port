@@ -94,19 +94,39 @@ See the budget above.
 - `-Dmg -River2600` builds (bank 0 ends `$394E`) but has never run, and its ring is unmeasured.
 - Boot on the DMG ROM takes ~1.5-1.7 s with a blank screen (measured in Gearboy); the tile sharing is part of it.
 
-## Dual ROM: next, before merging to `main` (user, 2026-11-02; not started)
+## Dual ROM (user, 2026-11-02): decisions, 2026-11-02 (code read; checked claims marked)
 
-One ROM that is the full GBC game on a GBC and the DMG game on a DMG. An outline from reading the code, nothing built or measured yet:
+One ROM: the full GBC game on a GBC, the DMG game on a DMG. The first outline was written from reading the code; this is the version after reading the real paths. Measured results go in the table at the end of the section.
 
-- **Header and boot:** `$0143 = $80`. Branch on `_cpu == CGB_TYPE`: double speed and colour palettes, or single speed and `BGP`/`OBP0`/`OBP1`. The build check must accept `$80`.
-- **Turn `PLATFORM_DMG` (32 lines in 8 files) into runtime branches or shared code.** Keep hot paths free of checks.
-- **VRAM layout:** the DMG layout on both, so the GBC cache goes from 250 to 226 slots, with the queue on both. The GBC HUD's 10 white digits can stay in bank 1. LCDC bit 4 clear on both.
-- **OAM attributes:** one byte can serve both, as a DMG ignores bit 3 and a GBC in colour mode ignores bit 4. `dmg_tile_map` becomes identity on a GBC, or the GBC uploads through the same allocator.
-- **Hardest part:** the GBC's per-row attributes (land flip, road colour) must go through the queue with their row, and `river_slot_attr` with them. `river_vram_copy_asm` was reasoned for single speed; check it at double speed too.
-- **Sprite recolouring** (balloon, enemy jet) runs on a DMG only, and the GBC keeps the original `ent_gfx_pal`, so that table's DMG variant becomes a runtime choice.
-- **Bank 0:** about 1.7 KB free in the GBC build. Move code to a higher bank if it does not fit; check the `.map`.
-- **Verification:** the GBC ROM can no longer be byte-identical, so that proof goes. Compare against today's ROMs as reference: `host_river_queue.ps1`, profile against `river_raid` (1.00 / 1.00 / 1.00) and `river_raid_dmg` (0.99-1.00 / 0.98 / 0.96), `-OamCheck`, `-RiverCheck`, `sprite_check.mjs` and `dmg_check.mjs` in both modes, screenshots with colours on GBC. **Both modes need the user's playtest.** The NES ROM must stay byte-identical. Gearboy's `ForceDMG` in `config.ini`, or the detection for a `$80` ROM, needs finding out: a dual ROM may boot as CGB by default.
+**Emulator modes (checked 2026-11-02).** Gearboy 3.8.18 reads `ForceDMG` from `gearboy/config.ini` only with `--portable` (without it the roaming `%APPDATA%\Geardome\Gearboy\config.ini` is used and the setting does nothing). A `$80` ROM with `--portable` and `ForceDMG = true` boots with AF `01B0` (a DMG); with `ForceDMG = false` AF is `1180` (a GBC). `get_media_info.is_cgb` reports the header flag, not the mode: use `get_cpu_status` (AF at PC `$0100`, `double_speed` later) and the ROM's own `gb_cgb`. Reference hashes reproduced from the clean tree: GBC `5598B71F`, `-Dmg` `0AAFB605`, `-River2600` `09F504E0`, NES `C1D44CF0` (copies in `roms/ref/`, git-ignored).
+**Build structure.**
+- `PLATFORM_DMG` keeps meaning "the DMG machinery is compiled" (queue, `dmg_tile_map`, sprite sharing, recolour, DMG HUD ids). New `PLATFORM_DUAL` (build_gbc.ps1 default, with `PLATFORM_DMG`) adds the CGB machinery (palettes, VBK, attribute map, bank-1 sprites and HUD). `-Dmg` alone stays: a compile-time DMG-only ROM. **It is the regression target: its hash must stay `0AAFB605...` (`roms/ref/river_raid_dmg.ref.gb`) after every step**, because every addition is `PLATFORM_DUAL`-guarded or folds to the old expression. The old GBC-only configuration is **kept compiling** as `build_gbc.ps1 -GbcOnly` (neither flag), and `-River2600` implies it (the 2600 build had ~190 bytes of bank 0 free and has never run with the queue); only the default build, the ROM that ships, is the dual. That gives two more free regression hashes: `-GbcOnly` = `5598B71F...` and `-River2600` = `09F504E0...`.
+- Runtime: `gb_cgb` (`_cpu == CGB_TYPE`), a variable in the dual build, constant 0 under `-Dmg`. Header `$0143 = $80` (`-Wm-yc`). `gbc_required()` is compiled out of the dual build only (a `$80` ROM runs on both); its font code was most of the GBC `_HOME` area.
+- NES: untouched. `entity_gfx.c` is generated and shared: the new tables sit inside `PLATFORM_DMG`/`PLATFORM_DUAL`.
 
+**VRAM layout (decided).**
+- Bank 0, both machines: the DMG layout. BG 0..2 fixed, 3..228 river cache (226 slots, queue on both), LCDC bit 4 clear.
+- GBC HUD: **stays in bank 1, ids 0..35 unchanged** (white digits and all), with its static attribute map and palettes. With LCDC bit 4 clear these are `$9000`+ in bank 1, which no sprite reaches (sprites use `$8000`..`$8FFF` of bank 1, ids up to 247). The outline's "10 white digits in bank 1, rest in bank 0" would have needed per-cell attributes that change with the tile; this does not. DMG HUD: ids 229..254, bank 0, as today. The `HT_*` ids get a runtime base (0 or 229); `hud_gbc_init` and `hud_update` branch on `gb_cgb`.
+- Sprites: GBC keeps bank 1 with the logic ids as they are (`dmg_tile_map` is the identity, no sharing, no recolour, original `ent_gfx_pal`). DMG: bank 0, shared, mapped, recoloured, as today. `set_sprite_data` goes through `dmg_sprite_data` on both (platform.h); on a GBC it calls the library function straight away.
+- **One OAM property byte for both:** `prop | S_BANK` always (a DMG ignores bit 3), and bit 4 (`S_PALETTE`) when the colour palette is 1..3 (a GBC in colour mode ignores bit 4). The asm needs no branch on the machine; the tile goes through `dmg_tile_map` on both. Checked against Pan Docs: bit 3 "CGB only", bit 4 "non-CGB only".
+
+**Per-row attributes (the part the outline expected to be hard): they do not go through the queue.**
+- The attribute is a property of the *map row* (palette from `river_job_pal`), not of a cache tile. A row is finished 98 px above the view top, which is on the hidden half of the 256 px ring (view 128 px; the hidden half is `SCY+128 .. SCY+256`; the row sits at `SCY+158`, 30 px below the view bottom). Its previous lap left the view 30 px (about 4 tile rows, less the 0-6 px lag) earlier. So the attribute row can be written at job time, as the GBC build does today, and the queue only has to carry tile ids (which it already does). Between job and drain (98 → 32 px above the view) the row is off screen with new colours and old ids: invisible, like the old ids with the new cache tiles on the DMG.
+- `river_slot_attr` (skip the write when the row's palette is unchanged) moves with it: written in `river_emit_stripe` after the queue-full check, so a retry does not redo it. Every `VBK_REG` write is behind `gb_cgb` (on a DMG a write to VBK does nothing and the "bank 1" data would overwrite bank 0). Sites: `river_start`, the attribute pass, `main()` sprite upload, `hud_gbc_init`.
+- To be checked, not assumed: the 30 px margin with lag; the attribute rows on screen against the generator (land flip, road); colours on screen.
+
+**`river_vram_copy_asm` at double speed (checked by reasoning, to be proved by `-RiverCheck` at both speeds).**
+- The two-writes-per-STAT-test window is in dots, not cycles: 16 M-cycles from the sample to the second write are 64 dots at single speed and 32 at double speed, against the 80 dots of mode 2 that follow a sample taken at the last moment of mode 0. Double speed has more margin, not less.
+- **A real hazard the comment glossed over, at either speed:** an interrupt landing between the sample and the writes. The LYC handler returns after `ld`/pop/`reti`, which is roughly 35-40 M-cycles after it saw mode 0: 140-160 dots at single speed, longer than the shortest HBlank, so the writes after the return can land in mode 3 and be dropped. Chance per copy is small (the sample must be in the last 64 dots of HBlank before line 127), so the readback test can easily miss it. Fix: `di` before the sample and `ei` after the second write; the handlers are delayed by at most 16 M-cycles. Negative control for the readback: delete the wait and expect errors.
+
+**Other decisions.**
+- Land colour flip, road colours, low-fuel HUD colours and the bridge flash: the GBC code paths are kept as they are, behind `gb_cgb`; the DMG paths (`BGP` flash, E/F going out) behind `!gb_cgb`.
+- `ent_gfx_pal` stays the GBC table; a second table `ent_gfx_pal_dmg` (generated) is used when `!gb_cgb`. They differ in one entry (balloon).
+- Boot: `cpu_fast()` only on a GBC (and not with `-DmgProxy`); palettes only on a GBC; `BGP/OBP0/OBP1` only on a DMG.
+- Bank 0 before: GBC build ends `$3928`, DMG `$3336` (the GBC build's `_HOME` is 2137 bytes against 358). Expect the dual to end near the GBC figure plus the queue (about +0.6 KB), minus `gbc_required`. Read the `.map` after every link.
+- No question for the user so far: nothing here changes either game's picture or cuts art. The GBC loses its 250-slot cache (226 plus the queue is the DMG design); that is invisible and should remove the bottom-row clobber on the GBC (to be measured).
+
+**Verification.** The GBC ROM can no longer be byte-identical: references are `roms/ref/` (hashes in HANDOFF). Per step: `-Dmg` hash, `host_river.ps1`, `host_river_queue.ps1`, `.\build.ps1` hash, `-OamCheck`/`-RiverCheck` ROMs (0 errors, run at both speeds), `sprite_check.mjs` and `dmg_check.mjs` in both modes (a GBC-mode branch with colour and attribute coverage), screenshots in both modes, then the profile against the reference numbers.
 ## If it does not work
 
 Fallback order, the user decides: simplify the river's features (fewer unique tiles), then `-River2600` on the same DMG plumbing (32 atlas tiles, 210-slot exact ring for islands and roads, and that ring would need the same measurement), then stay GBC only.

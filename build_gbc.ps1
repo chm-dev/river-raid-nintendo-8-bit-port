@@ -5,7 +5,7 @@
 #
 # Banked modules: entities, entity_gfx get -Wf-bo1; player gets -Wf-bo2.  The link is MBC5 with 4
 # banks.  After the link the script fails the build unless:
-#   - the header says CGB-only ($0143 = $C0; -Dmg: no CGB flag), MBC5+RAM+BATTERY ($0147 = $1B), 8 KB SRAM ($0149 = 2), the right
+#   - the header says $80 (the dual ROM), CGB-only $C0 (-GbcOnly, -River2600) or no CGB flag (-Dmg), MBC5+RAM+BATTERY ($0147 = $1B), 8 KB SRAM ($0149 = 2), the right
 #     ROM size code ($0148) and a valid header checksum ($014D);
 #   - the file is exactly Banks * 16 KB;
 #   - every ROM area in the .map sits inside its bank window (the linker does
@@ -24,12 +24,14 @@ param(
     [switch]$PassLog,           # per-pass log for tests/gb/pass_log.mjs (costs ~2k units per pass)
     [switch]$River2600,         # 2600 river: -DRIVER_BLOCKY -DRIVER_NOFEAT -DRIVER_FAST (docs/MOD_2600_SPEC.md)
     [switch]$DmgProxy,          # no cpu_fast(): the DMG CPU proxy (proposal row 8)
-    [switch]$Dmg,               # a real DMG ROM: no CGB flag, PLATFORM_DMG (PLAN_DMG.md)
+    [switch]$Dmg,               # a DMG-only ROM: no CGB flag, PLATFORM_DMG (PLAN_DMG.md)
+    [switch]$GbcOnly,           # the original GBC-only ROM (CGB-only header, no queue); -River2600 implies it
     [string[]]$Define = @()     # extra -D flags, e.g. RIVER_GRID=4
 )
 
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
+$dual = -not $Dmg -and -not $GbcOnly -and -not $River2600   # the ROM that ships: GBC and DMG in one
 $lcc = Join-Path $PSScriptRoot 'gbdk\bin\lcc.exe'
 $objDir = Join-Path $PSScriptRoot 'build\gbc'
 $outDir = Join-Path $PSScriptRoot 'roms'
@@ -56,6 +58,7 @@ foreach ($src in $Sources) {
     if ($River2600) { $a += '-DRIVER_BLOCKY', '-DRIVER_NOFEAT', '-DRIVER_FAST' }
     if ($DmgProxy) { $a += '-DDMG_PROXY' }
     if ($Dmg) { $a += '-DPLATFORM_DMG' }
+    elseif ($dual) { $a += '-DPLATFORM_DMG', '-DPLATFORM_DUAL' }
     foreach ($d in $Define) { $a += "-D$d" }
     # Game logic writes sprites in NES coordinates into gbc_logic_oam; only
     # gbc/main.c sees the real shadow_OAM and translates (camera, +16/+8).
@@ -68,7 +71,7 @@ foreach ($src in $Sources) {
 
 # ---- link ----
 $l = @('-msm83:gb', '-Wl-j', '-Wl-m', '-Wl-yt0x1B', '-Wl-ya1', "-Wl-yo$Banks") +
-     $(if ($Dmg) { @() } else { @('-Wm-yC') }) + @('-Wm-ynRIVERRAID', '-o', $rom) + $objs
+     $(if ($Dmg) { @() } elseif ($dual) { @('-Wm-yc') } else { @('-Wm-yC') }) + @('-Wm-ynRIVERRAID', '-o', $rom) + $objs
 & $lcc @l
 if ($LASTEXITCODE -ne 0) { Write-Host 'link failed' -ForegroundColor Red; exit 1 }
 
@@ -82,6 +85,9 @@ else { Fail "size $($bytes.Length) bytes, expected $($Banks * 16384)" }
 if ($Dmg) {
     if (($bytes[0x143] -band 0x80) -eq 0) { Pass ('header $0143 = ${0:X2} (no CGB flag)' -f $bytes[0x143]) }
     else { Fail ('header $0143 = ${0:X2}, expected no CGB flag' -f $bytes[0x143]) }
+} elseif ($dual) {
+    if ($bytes[0x143] -eq 0x80) { Pass 'header $0143 = $80 (GBC and DMG)' }
+    else { Fail ('header $0143 = ${0:X2}, expected $80 (GBC and DMG)' -f $bytes[0x143]) }
 } elseif ($bytes[0x143] -eq 0xC0) { Pass 'header $0143 = $C0 (CGB only)' }
 else { Fail ('header $0143 = ${0:X2}, expected $C0 (CGB only)' -f $bytes[0x143]) }
 
