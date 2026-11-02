@@ -8,3 +8,11 @@ Append-only. Do not read whole; grep for a keyword and read the matching `### da
 - New `HANDOFF.md`, `PLAN_2600.md` (Stage 1 checklist, gates, baseline table), `PROGRESS.md`, `BUGS&FEATS.md`. `AGENTS.md` updated to point at them. Proposal's Decision section records the start of Stage 1.
 - Found: the mod XEX is 10,754 bytes against 8,220 for the original.
 - No code changed, no build run.
+
+### 2026-11-02 - Stage 1 of the 2600 river: mod scope, baseline, blocky fast path (branch `river-2600`)
+
+- Mod = original cart + 961 patched bytes (booted XEX in AltirraBridge, dumped RAM). River patches: `$A89F` cmp operand `$EA` (straight banks), `$BA8F` walk table zeroed, `$A976` opcode change (feature rate, not modelled). `tools/river_validate.py` with `RIVER_CART=` reproduces the mod trace except the feature select.
+- Baseline (exact river): fast 0.76 passes/frame, DMG proxy 0.37; `river_update` avg 33.9k. Written in `PLAN_2600.md`.
+- Built `RIVER_2600`/`RIVER_BLOCKY`/`RIVER_NOFEAT`/`RIVER_FAST` in `src/river.c` and the model. Plain tile rows become atlas tile ids without rendering; the previous band's ids are reused on straight stretches. User gates: X=1.00, Y=0.60.
+- Result: fast 0.97, DMG proxy 0.57 (level 1). Not met. Remaining: band replay peaks, islands, oam_camera.
+- Tests: `host_river.ps1` default/-Mode2600/-Blocky/-Blocky -Grid 4 all match the model; `host_river_fast.ps1` (grid 8) identical on 4 start levels; NES build OK; GBC bank 0 checked (`$3E70` end without ProfExport). Playtest not run (user).

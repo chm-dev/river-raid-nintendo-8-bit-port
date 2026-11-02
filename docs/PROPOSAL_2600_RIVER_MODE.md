@@ -111,3 +111,5 @@ Peaks, not averages (`AGENTS.md` rule 9). Take a **baseline first** on the curre
 ## Decision
 
 **2026-11-02 — Stage 1 started (recorded by Claude from the user's instruction to prepare the workspace on a branch).** Work happens on branch `river-2600`; `HANDOFF.md`, `PLAN_2600.md` and `AGENTS.md` now refer to this file. The milestone 2 go/no-go this proposal waited for was already given (the GBC port is merged to `main`). Still open and not approved: the Stage 1 gate values (X, Y), the Stage 2 DMG prototype, the DMG gate, and the NES rollout. The user records those here.
+
+**2026-11-02 — Stage 1 decisions by the user.** (1) Gates: X = 1.00 passes/frame at double speed, Y = 0.60 on the single-speed proxy. (2) Features (houses, trees) and islands: snap to the tile grid; if that is still too expensive, remove them from the river sides altogether. Performance comes before authenticity, and the 2600 ROM and emulator are not needed unless this path fails. Claude's implementation choice: edges on an 8 px grid (22 atlas tiles; 4 px grid would need ~120), houses and trees dropped for now, islands still on the exact path.
