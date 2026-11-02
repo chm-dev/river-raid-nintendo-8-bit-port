@@ -2,7 +2,7 @@
 
 Short, current, rewritten every session. Rules are in `AGENTS.md`; the plan is `GBC_PORT_PLAN.md`; history is `PROGRESS.md` (grep it, do not read whole).
 
-**Last updated:** 2026-11-01 · **Branch:** `gbc-port` (merge to `main` pending the play-tests below) · **Phase:** milestone 2 passed and the user said go. 2-player mode is removed (play-tested). Sound is ported and play-tested. HUD rework done (awaiting play-test confirmation). Next: optional pacing work (step 5), then milestone 5
+**Last updated:** 2026-11-01 · **Branch:** `main` (gbc-port merged 2026-11-02) · **Phase:** milestone 2 passed and the user said go. 2-player mode is removed (play-tested). Sound is ported and play-tested. HUD rework done (awaiting play-test confirmation). Next: optional pacing work (step 5), then milestone 5
 
 ## Where we are
 
@@ -17,7 +17,7 @@ Short, current, rewritten every session. Rules are in `AGENTS.md`; the plan is `
 - **HUD:** `gbc/hud_gbc.c`, Window at WY=128, 20x2 cells, tiles in VRAM bank 1 ids 0..35, updated right after `vsync()`. Layout follows `tests/gb/gb_hud*.png`: row 0 lives / centred score (`hud_put_score`, centred for 1..6 digits) / `Bnn`; row 1 `E` bar `F` centred. Idle (ATTRACT): `HI` top-left and the white high score in the centre, no lives. Per-cell palettes 1/4/5/6; 4..6 swap to the low-fuel colours (red gauge, yellow E/F/Bnn) while `sound_warn_on` (exported from `sound_gbc.c`) is set. Sound: `gbc/sound_gbc.c` in bank 3 (1.2 KB), `BANKED` API, `sound_update()` called right after `vsync()` with the real `game_ticks`;
 - **Logic X stays the Atari HPOS**: `SOURCE_X_OFFSET` is 32 on GBC too; only the camera subtracts it.
 - Benchmarks (`GBC_PORT_PLAN.md` → Measurements): the DMG bench said river and entity passes fit the budget; the real ROM at fast speed does not (see next steps). Profiler units: 70,224 per frame, M = units / 2 at double speed. `tests/gb/profile_play.mjs` is the recipe (it finds `_player_invuln` in the `.noi`; build with `-ProfExport`).
-- `main` is NES-only. The NES project and its docs are in `archive/nes/`.
+- `main` now carries both targets (merged 2026-11-02). Some gbc-port changes are deliberate gameplay changes on all platforms, so the NES ROM differs from the old NES build. NES history is in `archive/nes/`.
 
 ## Next steps
 
@@ -57,7 +57,7 @@ Short, current, rewritten every session. Rules are in `AGENTS.md`; the plan is `
 
 - `river.c` emits harmless `always false` warnings (zero-width margin loops, `RIVER_LEFT_COL` is 0 on GBC).
 - The "GBC REQUIRED" screen (`_cpu != CGB_TYPE`) has never been run on a plain Game Boy.
-- The NES ROM builds but has not been play-tested since the branch diverged (shared files changed; ROM differs from old `main` build). NES code is still in the tree: `build.ps1`, `tests/nes_*.mjs`, `tests/perf_*`, and NES parts of `src/`. Remove or move it when it gets in the way; `main` keeps it until milestone 5.
+- The NES ROM builds; differences from the old NES build include intended cross-platform gameplay changes. NES code is still in the tree: `build.ps1`, `tests/nes_*.mjs`, `tests/perf_*`, and NES parts of `src/`. Remove or move it when it gets in the way; `main` keeps it until milestone 5.
 
 ## End of session (keep this cheap)
 

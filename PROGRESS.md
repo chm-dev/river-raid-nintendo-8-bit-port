@@ -149,3 +149,7 @@ The NES history is in `archive/nes/PROGRESS.md`.
 - `gbc-port` had replaced `<nes/nes.h>` with `<gb/gb.h>` in shared files, so `build.ps1` failed. Added `src/platform.h` (picks the SDK header by `__SDCC_sm83`) and used it in all shared files.
 - NES RAM was 8 bytes over: guarded GBC-only `river_clamps` / `river_owed_max`, and the `palette_color_t uint16_t` + palette no-op macros in `entities.c` (they doubled a local palette array and disabled NES palette calls). NES: 3 bytes free.
 - Verified: `build_gbc.ps1` ROM byte-identical before/after; `build.ps1` builds `river_raid.nes`. NES gameplay not re-tested.
+
+### 2026-11-02 - gbc-port merged into main
+
+- User confirmed all bugs play-tested and that some gbc-port changes are intended on every platform. Fast-forwarded `main`; both `build.ps1` and `build_gbc.ps1` verified from a clean checkout.
