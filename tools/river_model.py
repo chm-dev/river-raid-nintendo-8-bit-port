@@ -19,11 +19,12 @@ Run `python tools/river_model.py` to print a short generated sample.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CART = ROOT / "assets" / "atari" / "river_raid_cart_a000_bfff.bin"
+CART = Path(os.environ.get("RIVER_CART") or ROOT / "assets" / "atari" / "river_raid_cart_a000_bfff.bin")
 ROM = CART.read_bytes()
 
 
@@ -31,6 +32,11 @@ def rom(a: int, n: int) -> bytes:
     return ROM[a - 0xA000 : a - 0xA000 + n]
 
 
+# $A89F is the operand of "cmp #$08" at $A89E.  The 2600 mod patches it to $EA, so the
+# "nib < threshold" test always passes and the direction logic below never runs.
+NIB_PASS = ROM[0x89F]
+# $A977 is the operand of "and #$20" at $A976 (feature spawn test); the mod makes it $27.
+FEATURE_MASK = ROM[0x977]
 BANK_MAIN = rom(0xB800, 16)
 BANK_ISLAND = rom(0xB810, 16)
 WALK_BA8F = rom(0xBA8F, 32)
@@ -225,7 +231,7 @@ class RiverState:
 
     def _feature_select(self) -> None:
         """$A96C-$A9D5."""
-        if (self.flags23 & 0x80) or self.rowcount != 0 or not (self.lfsr_c & 0x20):
+        if (self.flags23 & 0x80) or self.rowcount != 0 or not (self.lfsr_c & FEATURE_MASK):
             return
         if self.level & 1:
             x = self.lfsr_a & 0x07
@@ -453,7 +459,7 @@ class RiverState:
                 if self.c3 == 0:
                     self.c3 = 0x01 if nib >= 8 else 0xFF
                     self._clamp_decision(nib)
-                elif nib < 8:
+                elif nib < NIB_PASS:
                     pass
                 elif nib == 0x0D:
                     self.c3 ^= 0xFE
