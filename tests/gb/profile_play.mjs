@@ -7,7 +7,7 @@
  *
  * Build with .\build_gbc.ps1 -ProfExport so static functions have names.
  * Profiler units are 70,224 per frame at any CPU speed: M-cycles at double
- * speed = units / 2.  The headline number is passes (wait_vbl_done calls)
+ * speed = units / 2.  The headline number is passes (river_update calls)
  * per frame: 1.0 = 60 Hz, 0.5 = the main loop locked at 30 Hz.
  */
 import { readFileSync, writeFileSync } from 'fs';
@@ -51,7 +51,7 @@ if (/DEF _pl_oam_n /.test(noi)) {
     const rd16 = async n => { const o = JSON.parse(txt(await c.call('read_memory', { area: 6, offset: (parseInt(new RegExp(`DEF ${n} 0x([0-9A-Fa-f]+)`).exec(noi)[1], 16) - 0xC000).toString(16).toUpperCase().padStart(4, '0'), size: 2 }))); return parseInt(o.data.replace(/\s+/g, '').match(/../g).reverse().join(''), 16); };
     console.log('oamcheck: passes', await rd16('_pl_oam_n'), 'errors', await rd16('_pl_oam_err'), 'draw errors', await rd16('_pl_oam_draw_err'));
 }
-const w = d.functions.find(f => f.name === '_wait_vbl_done');
+const w = d.functions.find(f => f.name === '_river_update');   /* one per pass; vsync() is skipped after an overrun */
 console.log(`mode ${mode}: frames ${d.frames}, passes ${w ? w.calls : '?'}, passes/frame ${w ? (w.calls / d.frames).toFixed(2) : '?'}`);
 for (const f of d.functions) {
     console.log(f.name.padEnd(26), 'calls', String(f.calls).padStart(5), 'avg', String(f.average_cycles).padStart(7),

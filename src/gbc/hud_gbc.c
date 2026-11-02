@@ -15,8 +15,7 @@
  * cell's palette: 1 yellow (planes, score), 4 B/F, 5 E, 6 gauge.  Palettes 4..6
  * change while the low-fuel note sounds (sound_warn_on): the gauge goes red and
  * the text goes yellow.  hud_update() builds the wanted 40 cells and writes only
- * the ones that changed.  Call it right after vsync(): the writes then land in
- * VBlank.
+ * the ones that changed; the library's VRAM and palette writes wait for STAT.
  */
 #include <gb/gb.h>
 #include <gb/cgb.h>

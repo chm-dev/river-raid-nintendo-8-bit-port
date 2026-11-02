@@ -7,9 +7,13 @@
  *
  * Camera: the ring is 256 px, so the river's scroll value is also SCY (plus a
  * constant that anchors the 128 px view to the bottom of the logic world).
- * There is no split-screen interrupt: SCX/SCY are written right after vsync(),
- * still inside VBlank.  Game logic keeps NES coordinates (X = Atari HPOS, Y =
- * NES scanlines); only this file maps them to the screen.
+ * There is no split-screen interrupt: the VBlank handler writes SCX/SCY.  Game
+ * logic keeps NES coordinates (X = Atari HPOS, Y = NES scanlines); only this file
+ * maps them to the screen.
+ *
+ * Frames: a pass that ends publishes what it computed (scroll, a finished OAM page)
+ * and the VBlank handler shows the latest one.  The next pass starts at once if a
+ * frame has already gone by, so a pass of 1.1 frames costs 1.1 frames, not 2.
  *
  * Sprites: the logic files are compiled with shadow_OAM renamed to
  * gbc_logic_oam (see build_gbc.ps1), so they keep writing NES-coordinate
@@ -178,9 +182,28 @@ static void camera_follow(void) {
     }
 }
 
-static void apply_camera(void) {
-    SCX_REG = camera_x;
-    SCY_REG = (uint8_t)(playfield_scroll_y + (GBC_VIEW_TOP_SCANLINE - PLAYFIELD_SCANLINE));
+static uint8_t oam_cam_x;           /* also publish_pass's scratch */
+
+/* OAM is double buffered: the pass fills the page the DMA is not reading, then
+ * _shadow_OAM_base flips to it (the VBlank handler's DMA reads that byte). */
+#define OAM_PAGE2_ADDR      0xD000u
+uint8_t __at(OAM_PAGE2_ADDR) oam_page2[160];
+uint8_t *oam_back = oam_page2;
+static uint8_t oam_cam_filled = 40u;  /* hardware slots last written on the back page (40: unknown) */
+static uint8_t oam_cam_filled2 = 40u; /* ... on the page being shown */
+static volatile uint8_t pub_scx, pub_scy;
+
+/* The pass is finished: show it at the next VBlank. */
+static void publish_pass(void) {
+    __critical {
+        pub_scx = camera_x;
+        pub_scy = (uint8_t)(playfield_scroll_y + (GBC_VIEW_TOP_SCANLINE - PLAYFIELD_SCANLINE));
+        _shadow_OAM_base = (uint8_t)((uint16_t)oam_back >> 8);
+    }
+    oam_back = (oam_back == oam_page2) ? (uint8_t *)shadow_OAM : oam_page2;
+    oam_cam_x = oam_cam_filled;
+    oam_cam_filled = oam_cam_filled2;
+    oam_cam_filled2 = oam_cam_x;
 }
 
 /* Translate the logic sprites (NES coordinates) to hardware OAM: subtract the
@@ -190,6 +213,7 @@ static void apply_camera(void) {
 typedef char oam_camera_x_assert[(SOURCE_X_OFFSET >= 8u) ? 1 : -1];
 
 static void oam_camera_slow(void) {
+    OAM_item_t *d = (OAM_item_t *)oam_back;
     uint8_t i, n = 0, y, x, xbase;
 
     /* All 8-bit: y < 240 spans fewer than 256 values and x spans exactly 256,
@@ -203,10 +227,11 @@ static void oam_camera_slow(void) {
         }
         /* Pause menu slots (player.c) hold hardware coordinates: no camera. */
         if (player_state == GBC_PLAYER_STATE_PAUSE && (i >= 56u || (i >= 2u && i <= 4u))) {
-            shadow_OAM[n].y = y;
-            shadow_OAM[n].x = gbc_logic_oam[i].x;
-            shadow_OAM[n].tile = gbc_logic_oam[i].tile;
-            shadow_OAM[n].prop = (uint8_t)(gbc_logic_oam[i].prop | S_BANK);
+            d->y = y;
+            d->x = gbc_logic_oam[i].x;
+            d->tile = gbc_logic_oam[i].tile;
+            d->prop = (uint8_t)(gbc_logic_oam[i].prop | S_BANK);
+            d++;
             n++;
             continue;
         }
@@ -216,21 +241,22 @@ static void oam_camera_slow(void) {
             (uint8_t)(x - 1u) >= 167u) {
             continue;
         }
-        shadow_OAM[n].y = (uint8_t)(y + 8u);
-        shadow_OAM[n].x = x;
-        shadow_OAM[n].tile = gbc_logic_oam[i].tile;
-        shadow_OAM[n].prop = (uint8_t)(gbc_logic_oam[i].prop | S_BANK);
+        d->y = (uint8_t)(y + 8u);
+        d->x = x;
+        d->tile = gbc_logic_oam[i].tile;
+        d->prop = (uint8_t)(gbc_logic_oam[i].prop | S_BANK);
+        d++;
         n++;
     }
     while (n < 40u) {
-        shadow_OAM[n++].y = 0u;
+        d->y = 0u;
+        d++;
+        n++;
     }
 }
 
 #define OAM_SHOT_SLOT       47u     /* = PLAYER_SHOT_SLOT in player.c */
-static uint8_t oam_cam_filled = 40u; /* hardware slots written by the last pass (40: boot, unknown) */
 static uint8_t oam_cam_xbase;
-static uint8_t oam_cam_x;
 
 /* The common case (no pause menu): same output as oam_camera_slow, walking the
  * arrays by pointer.  The per-slot work is what costs here (64 slots, most of
@@ -247,7 +273,7 @@ static void oam_camera(void) {
     }
     oam_cam_xbase = (uint8_t)(SOURCE_X_OFFSET + camera_x - 8u);
     s = (const uint8_t *)gbc_logic_oam;
-    d = (uint8_t *)shadow_OAM;
+    d = oam_back;
     /* Outside the pause menu only slots below ent_oam_used and the shot are live. */
     i = ent_oam_used;
 next_range:
@@ -266,7 +292,7 @@ next_range:
         *d++ = oam_cam_x;
         *d++ = s[2];
         *d++ = (uint8_t)(s[3] | S_BANK);
-        if ((uint8_t)(uint16_t)d == 160u) {     /* shadow_OAM is page aligned */
+        if ((uint8_t)(uint16_t)d == 160u) {     /* both OAM pages are page aligned */
             oam_cam_filled = 40u;
             return;
         }
@@ -301,6 +327,8 @@ static void hud_hide_sprites_isr(void) {
 
 static void hud_show_sprites_isr(void) {
     LCDC_REG |= LCDCF_OBJON;
+    SCX_REG = pub_scx;
+    SCY_REG = pub_scy;
 }
 
 void main(void) {
@@ -336,8 +364,9 @@ void main(void) {
     entities_init();
     collision_init();
     camera_follow();
-    apply_camera();
     oam_camera();
+    publish_pass();
+    hud_show_sprites_isr();
     SHOW_BKG;
     SHOW_SPRITES;
     LYC_REG = (uint8_t)(GBC_VIEW_LINES - 1u);
@@ -349,10 +378,11 @@ void main(void) {
 
     main_last = (uint8_t)sys_time;
     for (;;) {
-        /* vsync() always waits for the NEXT VBlank, so a pass of 1.01 frames
-         * costs 2: pass time is a step function of the work. */
-        vsync();
-        apply_camera();
+        /* Wait only if no frame has gone by: vsync() always waits for the NEXT
+         * VBlank, so calling it after an overrun would turn 1.01 frames into 2. */
+        if ((uint8_t)sys_time == main_last) {
+            vsync();
+        }
 
         game_ticks = (uint8_t)((uint8_t)sys_time - main_last);
         main_last = (uint8_t)sys_time;
@@ -362,7 +392,7 @@ void main(void) {
         frame_counter++;
         sound_update();                 /* real frame count, before game_ticks is merged */
         if ((uint8_t)(logic_acc + game_ticks) < LOGIC_FRAMES) {
-            hud_update();               /* VRAM writes, still in VBlank */
+            hud_update();               /* VRAM writes (the library waits for STAT) */
         }
 
         /* Same schedule as the NES main: the river every frame, the player
@@ -431,6 +461,7 @@ void main(void) {
             oam_camera_slow();
         }
 #endif
+        publish_pass();
 #ifdef PROF_PASSLOG
         pl_rec[pl_idx][6] = LY_REG;
         pl_idx = (uint8_t)((pl_idx + 1u) & (PASS_LOG_N - 1u));

@@ -1780,9 +1780,7 @@ void entities_update(void) BANKED {
 }
 
 #ifdef PROF_OAMCHECK
-/* The real hardware shadow, not the logic OAM this file writes (build_gbc.ps1 renames it). */
-#undef shadow_OAM
-extern volatile struct OAM_item_t shadow_OAM[];
+extern uint8_t *oam_back;       /* gbc/main.c: the hardware OAM page this pass filled */
 uint8_t pl_oam_a[160];
 uint16_t pl_oam_n, pl_oam_err, pl_oam_draw_err;
 
@@ -1790,8 +1788,8 @@ uint16_t pl_oam_n, pl_oam_err, pl_oam_draw_err;
 void ent_check_oam(uint8_t what) BANKED {
     for (e_t = 0; e_t < 160u; e_t++) {
         if (what == 0u) {
-            pl_oam_a[e_t] = ((const uint8_t *)shadow_OAM)[e_t];
-        } else if (pl_oam_a[e_t] != ((const uint8_t *)shadow_OAM)[e_t]) {
+            pl_oam_a[e_t] = oam_back[e_t];
+        } else if (pl_oam_a[e_t] != oam_back[e_t]) {
             if (what == 1u) {
                 pl_oam_err++;
             } else {

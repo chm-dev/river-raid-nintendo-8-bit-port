@@ -7,7 +7,8 @@ Disk traces carry no timing, so each instruction's cost comes from an SM83 M-cyc
 profiler units at single speed; a taken branch is seen from the next PC; HALT counts as 0).
 Symbols: the .noi plus the statics in build/gbc/*.sym (each area's base comes from a global that
 is in both), so the last build must be the one traced.  Units are the trace's (70,224 per frame).
-Each pass starts at _wait_vbl_done; a frame is an entry to $0040.  The phase of an instruction is the last top-level function
+Each pass starts at _sound_update (the first call of the pass; vsync() may be skipped); a frame is an
+entry to $0040.  The phase of an instruction is the last top-level function
 entered from main; interrupt handlers (from the entry at $40/$48 until RETI) are their own phase.
 """
 import bisect
@@ -76,6 +77,7 @@ def cost_of(b):
 
 entry = {syms[p]: p for p in PHASES if p in syms}
 wait = syms.get("_wait_vbl_done")
+first = syms.get("_sound_update")
 rx = re.compile(r"^\S+\s+(?:\+\d+\s+)?([0-9A-Fa-f]{3}):([0-9A-Fa-f]{4})\s+A:.*?\s{2,}((?:[0-9A-Fa-f]{2} ?)+)\s*$")
 excl = collections.Counter()
 calls = collections.Counter()
@@ -109,10 +111,11 @@ with open(trace, errors="replace") as fh:
             irq_save, phase = phase, "irq"
         if irq_save is None:
             if full == wait:
-                passes.append(cur)
-                cur = collections.Counter()
                 phase = "vsync"
             elif full in entry:
+                if full == first:
+                    passes.append(cur)
+                    cur = collections.Counter()
                 phase = entry[full]
             elif s == "_main":
                 phase = "main"
@@ -135,6 +138,10 @@ print(f"{'work (no vsync)':22} {sum(work) / n:9.0f} {max(work):8}")
 w = sorted(work)
 print(f"work percentiles: p50 {w[n // 2]}  p90 {w[n * 9 // 10]}  p99 {w[n * 99 // 100]}; "
       f"passes under one frame of work: {sum(1 for x in work if x < 70224) * 100 // n}%")
+print("\nworst passes:")
+for i in sorted(range(n), key=lambda i: -work[i])[:8]:
+    top = ", ".join(f"{k} {v}" for k, v in passes[i].most_common(4) if k != "vsync")
+    print(f"  #{i}: {work[i]:7}  {top}")
 print(f"\n{'function (exclusive)':30} {'entries':>7} {'avg/pass':>9} {'%':>5}")
 for k, v in excl.most_common(rows):
     print(f"{k:30} {calls[k]:7} {v / n:9.0f} {100 * v / total:5.1f}")

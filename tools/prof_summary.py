@@ -32,7 +32,7 @@ def name(f):
 
 
 fs = d["functions"]
-passes = next((f["calls"] for f in fs if f["name"] == "_wait_vbl_done"), 1)
+passes = next((f["calls"] for f in fs if f["name"] == "_river_update"), 1)
 total = sum(f["exclusive_cycles"] for f in fs)
 idle = sum(f["exclusive_cycles"] for f in fs if f["name"] in ("[HALT]",))
 print(f"frames {d['frames']} passes {passes} ({passes / d['frames']:.2f}/frame); "
