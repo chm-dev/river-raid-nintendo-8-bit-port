@@ -144,7 +144,7 @@ The NES history is in `archive/nes/PROGRESS.md`.
 
 - Blinking sprites after the HUD-hide fix: the main loop re-enabled OBJ after vsync(), so an overrun pass left the next frame without sprites. Now `hud_show_sprites_isr` (add_VBL) does it. User play-tested: fine, slight stutter on busy late levels accepted. Remaining risk: OAM DMA can copy a half-written list if VBlank hits inside oam_camera (stage in a second buffer if it shows).
 
-### 2026-11-02 - Dual-target build restored, gbc-port merged to main
+### 2026-11-02 - Dual-target build restored (branch `gbc-port`, not yet merged)
 
 - `gbc-port` had replaced `<nes/nes.h>` with `<gb/gb.h>` in shared files, so `build.ps1` failed. Added `src/platform.h` (picks the SDK header by `__SDCC_sm83`) and used it in all shared files.
 - NES RAM was 8 bytes over: guarded GBC-only `river_clamps` / `river_owed_max`, and the `palette_color_t uint16_t` + palette no-op macros in `entities.c` (they doubled a local palette array and disabled NES palette calls). NES: 3 bytes free.

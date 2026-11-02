@@ -2,7 +2,7 @@
 
 Short, current, rewritten every session. Rules are in `AGENTS.md`; the plan is `GBC_PORT_PLAN.md`; history is `PROGRESS.md` (grep it, do not read whole).
 
-**Last updated:** 2026-11-01 · **Branch:** `main` (gbc-port merged) · **Phase:** milestone 2 passed and the user said go. 2-player mode is removed (play-tested). Sound is ported and play-tested. HUD rework done (awaiting play-test confirmation). Next: optional pacing work (step 5), then milestone 5
+**Last updated:** 2026-11-01 · **Branch:** `gbc-port` (merge to `main` pending the play-tests below) · **Phase:** milestone 2 passed and the user said go. 2-player mode is removed (play-tested). Sound is ported and play-tested. HUD rework done (awaiting play-test confirmation). Next: optional pacing work (step 5), then milestone 5
 
 ## Where we are
 
