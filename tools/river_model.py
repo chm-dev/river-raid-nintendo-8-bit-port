@@ -328,6 +328,7 @@ class RiverState:
 
         # --- left bank and left-side feature ----------------------------- #
         x = self.left if island else _b(self.left + self.phase)
+        x_true = x
         if BLOCKY and not island:
             x &= ~(GRID - 1) & 0xFF
         y = (x >> 2) - 1
@@ -343,7 +344,9 @@ class RiverState:
         # --- island / right bank ----------------------------------------- #
         a = self.width
         if BLOCKY and not island:
-            a &= ~(GRID - 1) & 0xFF
+            # the right edge rounds up, the left one down: the drawn river contains the true one,
+            # so everything the spawner places in the true river stands on drawn water
+            a = _b(((x_true + self.width + GRID - 1) & ~(GRID - 1)) - x)
         if island:
             if self.phase < 6:
                 a = _b(self.width + self.phase + self.phase)

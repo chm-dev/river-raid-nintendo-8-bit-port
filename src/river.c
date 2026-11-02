@@ -134,6 +134,7 @@ static uint8_t rg_ysave;
  * RIVER_GRID).  Island rows keep the exact geometry. */
 #ifdef RIVER_BLOCKY
 #define RIVER_Q(v)          ((uint8_t)((v) & (uint8_t)~(RIVER_GRID - 1u)))
+#define RIVER_QUP(v)        ((uint8_t)(((v) + RIVER_GRID - 1u) & (uint8_t)~(RIVER_GRID - 1u)))
 #else
 #define RIVER_Q(v)          (v)
 #endif
@@ -142,7 +143,7 @@ static uint8_t rg_ysave;
  * rotating exact cache uses the rest (see "Band fast path"). */
 #ifdef RIVER_FAST
 #ifndef RIVER_ATLAS_N
-#define RIVER_ATLAS_N       96u
+#define RIVER_ATLAS_N       40u        /* 32 used over 20,000 rows on all 4 start levels, + 8 headroom (see af_next) */
 #endif
 #define RIVER_RING_FIRST    RIVER_ATLAS_N
 #else
@@ -1093,7 +1094,8 @@ static void river_render_row(void) {
     a = rg_width;
 #ifdef RIVER_BLOCKY
     if (!island) {
-        a = RIVER_Q(a);
+        /* right edge up, left edge down: see RIVER_QUP */
+        a = (uint8_t)(RIVER_QUP((uint8_t)(rg_left + rg_phase + rg_width)) - x);
     }
 #endif
     if (island) {
@@ -1319,7 +1321,7 @@ static void river_step_state(void) {
          * rows becomes tile ids without ever being rendered (river_fast_cols), or
          * is rendered afterwards when it turns out irregular (river_band_replay). */
         rg_row_left = RIVER_Q((uint8_t)(rg_left + rg_phase));
-        rg_row_right = (uint8_t)(rg_row_left + RIVER_Q(rg_width));
+        rg_row_right = RIVER_QUP((uint8_t)(rg_left + rg_phase + rg_width));
         rg_row_island_left = 0;
         rg_row_island_right = 0;
         rb_L[river_block_index] = rg_row_left;
@@ -2298,7 +2300,7 @@ static uint8_t river_job_left;
 /* Atlas slot of [side][jump at row 2][jump at row 6][dl]; 0 = not built.  Grid 8
  * never jumps at row 2, grid 4 does. */
 static uint8_t af_id[2][AF_JUMP_N][AF_JUMP_N][AF_DL_N];
-static uint8_t af_next;                 /* atlas slots used */
+uint8_t af_next;                        /* atlas slots used (read by the host check) */
 static int16_t af_j1, af_j2;            /* jumps of the pending band's edge (set per side) */
 static int16_t af_jL1, af_jL2, af_jR1, af_jR2;
 static uint8_t rj_fast;                 /* the pending tile row takes the fast path */
@@ -2369,8 +2371,9 @@ static uint8_t river_edge_byte(uint8_t b) {
  * conversion (tests/host_river_fast.ps1 compares it with the exact path).  The tile is column
  * AF_TILE_COL of the synthetic row, bytes 6 and 7. */
 static uint8_t ab_b0, ab_b1;
+static uint8_t *ab_dst;                /* file scope: live across calls (AGENTS.md rule 3) */
 static void river_atlas_build(void) {
-    uint8_t *dst = &river_tile_pat[(uint16_t)rj_c * 16u];
+    ab_dst = &river_tile_pat[(uint16_t)rj_c * 16u];
 
     for (af_k = 0; af_k < 8u; af_k++) {
         af_xv = (uint8_t)(af_x + ((af_k >= 3u) ? af_j1 : 0) + ((af_k >= 7u) ? af_j2 : 0));
@@ -2386,8 +2389,8 @@ static void river_atlas_build(void) {
         }
         ab_b0 = river_edge_byte(2u * AF_TILE_COL);
         ab_b1 = river_edge_byte(2u * AF_TILE_COL + 1u);
-        dst[(uint8_t)((7u - af_k) * 2u)] = (uint8_t)((river_lut_p0[ab_b0] << 4) | river_lut_p0[ab_b1]);
-        dst[(uint8_t)((7u - af_k) * 2u + 1u)] = (uint8_t)((river_lut_p1[ab_b0] << 4) | river_lut_p1[ab_b1]);
+        ab_dst[(uint8_t)((7u - af_k) * 2u)] = (uint8_t)((river_lut_p0[ab_b0] << 4) | river_lut_p0[ab_b1]);
+        ab_dst[(uint8_t)((7u - af_k) * 2u + 1u)] = (uint8_t)((river_lut_p1[ab_b0] << 4) | river_lut_p1[ab_b1]);
     }
 }
 
@@ -2444,9 +2447,9 @@ static uint8_t river_band_regular(void) {
 
 /* Fill river_row_ids for the columns from river_job_col on.  0 when it has to
  * yield (budget spent or transfer buffer full); it resumes at the same column. */
+static uint8_t *af_slot;                /* file scope: live across calls (AGENTS.md rule 3) */
 static uint8_t river_fast_cols(void) {
     int16_t dl;
-    uint8_t *slot;
 
     while (river_job_col < RIVER_TILE_COLS) {
         rj_c = river_job_col;
@@ -2468,9 +2471,9 @@ static uint8_t river_fast_cols(void) {
             river_row_ids[rj_c] = TILE_LAND;
         }
         if ((rj_c >= af_cl0 && rj_c <= af_cl1) || (rj_c >= af_cr0 && rj_c <= af_cr1)) {
-            slot = &af_id[af_side][(af_j1 / (int16_t)RIVER_GRID) + 2][(af_j2 / (int16_t)RIVER_GRID) + 2]
+            af_slot = &af_id[af_side][(af_j1 / (int16_t)RIVER_GRID) + 2][(af_j2 / (int16_t)RIVER_GRID) + 2]
                          [(dl - AF_DL_MIN) >> AF_SHIFT];
-            rj_id = *slot;
+            rj_id = *af_slot;
             if (!rj_id) {
                 if (!river_job_left) {
                     return 0u;
@@ -2483,7 +2486,7 @@ static uint8_t river_fast_cols(void) {
                     return 0u;
                 }
                 af_next++;
-                *slot = rj_id;
+                *af_slot = rj_id;
             }
             river_row_ids[rj_c] = rj_id;
         }
