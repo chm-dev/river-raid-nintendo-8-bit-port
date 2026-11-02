@@ -26,3 +26,16 @@ After unpacking, 961 of 8192 cart bytes differ, in 38 runs. The code layout is i
 - Identify the `BC06-BF04` tables with `docs/ATARI_RE_SPEC.md` / the original disasm.
 - Confirm that nothing in the dump was changed by runtime writes (all diffs are in cart RAM, which the game should not write, but check by dumping at two different frame counts).
 - Non-river changes (glyphs, text, `$EA` patches) look small; the river looks like a data-table swap plus a few constants. Risk 1 (pollution) looks low. Confirm after the disassembly.
+
+## River generator (found 2026-11-02)
+
+The mod river = the original generator with these patches (validated: `tools/river_validate.py` on 397 mod transitions, only the feature select differs):
+- `$A89F` `cmp #$08` -> `cmp #$EA` in the bank-direction code. The direction is picked when `$C3` is 0 and the "nib >= 8" decisions never run again. Banks stay straight; only the section ramps (`$A7FB`) change the width, by 1 pixel per row per edge.
+- `$BA8F..$BAAE` bridge walk table zeroed (no wobble at bridges).
+- `$A976` opcode `$29` -> `$27` (`AND #$20` becomes `RLA $20`). Not modelled; it changes how often features (houses, trees, islands) appear. 6 of 397 transitions.
+- `$BC06..$BF04` row templates (the tree/house art) are flattened to plain `$55` land texture with new shapes.
+- Other code patches (`$A06B`, `$A2A9`, `$A2B5`, `$A616`, `$A6A1`, `$A6FC`, `$ADAB`, `$B42B`...) are in colour, object and enemy code, not the river.
+
+## Measured shape (400 rows, level 1)
+- Plain rows (one continuous water run): left edge slope {0: 209, -1: 12}, right edge {0: 209, +1: 12}. The original: slopes {-2..+2}, all frequent.
+- Unique 8x8 tiles over windows of 8 plain rows, all 8 vertical phases: **mod 54, original 617**. This is the estimate for proposal row 9 (edges only, level 1 start). Features add tiles; not yet counted.

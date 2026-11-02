@@ -19,7 +19,8 @@ param(
     [int]$Banks = 4,
     [string[]]$RequireSymbols = @('_frame_counter', '_gbc_logic_oam'),
     [switch]$ProfExport,
-    [switch]$OamCheck
+    [switch]$OamCheck,
+    [switch]$River2600          # river_2600 mode: -DRIVER_2600 (docs/MOD_2600_SPEC.md)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -45,6 +46,7 @@ foreach ($src in $Sources) {
     if ($base -in 'sound_gbc', 'save_gbc') { $a += '-Wf-bo3' }
     if ($ProfExport) { $a += '-DPROF_EXPORT_STATICS' }
     if ($OamCheck) { $a += '-DPROF_OAMCHECK' }
+    if ($River2600) { $a += '-DRIVER_2600' }
     # Game logic writes sprites in NES coordinates into gbc_logic_oam; only
     # gbc/main.c sees the real shadow_OAM and translates (camera, +16/+8).
     if ($src -notlike '*gbc/main.c') { $a += '-Dshadow_OAM=gbc_logic_oam' }
