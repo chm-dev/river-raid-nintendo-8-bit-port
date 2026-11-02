@@ -2298,7 +2298,7 @@ static uint8_t river_road_slot;       /* first (odd) slot of the road, or 0xFF *
 static uint8_t river_road_stage;      /* margin/attribute writes done for the job */
 static uint8_t river_land_alt;        /* land colour: 0 = $D2, 1 = $D6 */
 static uint8_t river_job_pal;         /* BG palette of the pending tile row */
-#if defined(__SDCC_sm83) && !defined(PLATFORM_DMG)
+#ifdef GB_HAS_CGB
 static uint8_t river_slot_attr[RIVER_RING_ROWS];   /* BG attribute last written per map row */
 #endif
 static uint8_t river_flip_age;        /* tile rows since the land colour flipped (255 = long ago) */
@@ -2620,6 +2620,24 @@ static uint8_t river_emit_stripe(void) {
     if (rq_rn >= RQ_ROWS) {
         return 0u;
     }
+#ifdef PLATFORM_DUAL
+    if (gb_cgb) {
+        /* Colour belongs to the map row, not to a cache tile, so it is not queued: the row is off
+         * screen both now (98 px above the view) and when its ids upload (32 px above), and the
+         * previous lap of this slot has been off screen for ~30 px (PLAN_DMG.md, Dual ROM). */
+        rj_c = (river_job_pal == ROAD_PALETTE) ? GBC_PAL_ROAD :
+               (river_job_pal == PLAYFIELD_ALT_PALETTE) ? GBC_PAL_ALT : GBC_PAL_LAND;
+        if (river_slot_attr[river_pending_slot] != rj_c) {
+            river_slot_attr[river_pending_slot] = rj_c;
+            rj_addr = (uint16_t)(PPU_NT1_BASE + ((uint16_t)river_pending_slot << 5) + RIVER_LEFT_COL);
+            VBK_REG = 1;
+            for (rj_n = 0; rj_n < RIVER_TILE_COLS; rj_n++) {
+                set_vram_byte((uint8_t *)(rj_addr + rj_n), rj_c);
+            }
+            VBK_REG = 0;
+        }
+    }
+#endif
     rq_row_slot[rq_rh] = river_pending_slot;
     rq_row_n[rq_rh] = rq_new;
     rq_new = 0u;
@@ -3398,13 +3416,15 @@ static void river_start(uint8_t restart, uint8_t bridges) {
     for (i = 0; i < 64u; i++) {
         set_vram_byte((uint8_t *)(PPU_NT1_ATTR + i), 0xAAu);
     }
-#elif !defined(PLATFORM_DMG)
-    /* Clear the BG attribute map (VRAM bank 1): palette 0, tile bank 0. */
-    VBK_REG = 1;
-    fill_bkg_rect(0, 0, 32, 32, 0);
-    VBK_REG = 0;
-    for (i = 0; i < RIVER_RING_ROWS; i++) {
-        river_slot_attr[i] = 0u;
+#elif defined(GB_HAS_CGB)
+    if (gb_cgb) {
+        /* Clear the BG attribute map (VRAM bank 1): palette 0, tile bank 0. */
+        VBK_REG = 1;
+        fill_bkg_rect(0, 0, 32, 32, 0);
+        VBK_REG = 0;
+        for (i = 0; i < RIVER_RING_ROWS; i++) {
+            river_slot_attr[i] = 0u;
+        }
     }
 #endif
 

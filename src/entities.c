@@ -128,6 +128,14 @@ static uint8_t e_n;
 uint16_t pl_scan_err;
 #endif
 
+#ifdef PLATFORM_DUAL
+/* The sprite palette numbers per object: the GBC table, or the DMG one (entities_init_graphics). */
+static uint8_t ent_pal_run[18];
+#define ENT_GFX_PAL         ent_pal_run
+#else
+#define ENT_GFX_PAL         ent_gfx_pal
+#endif
+
 static uint8_t ent_random(void) {
     ent_rng ^= (uint8_t)(ent_rng << 7);
     ent_rng ^= (uint8_t)(ent_rng >> 5);
@@ -136,7 +144,7 @@ static uint8_t ent_random(void) {
 }
 
 /* The land palettes' water entry (all three: dark land, bright land, road). */
-#if defined(__SDCC_sm83) && defined(PLATFORM_DMG)
+#if defined(__SDCC_sm83) && defined(PLATFORM_DMG) && !defined(PLATFORM_DUAL)
 /* One BGP: the whole river's water changes shade, as it does on the Atari. */
 static void ent_water_color(uint8_t flash) {
     BGP_REG = flash ? DMG_BGP_FLASH : DMG_BGP;
@@ -154,6 +162,12 @@ static uint8_t ent_flash_cur;
 static palette_color_t ent_flash_pal[3][4];
 static uint8_t ent_flash_k;
 static void ent_water_color(uint8_t flash) {
+#ifdef PLATFORM_DUAL
+    if (!gb_cgb) {                      /* one BGP: the whole river's water changes shade */
+        BGP_REG = flash ? DMG_BGP_FLASH : DMG_BGP;
+        return;
+    }
+#endif
     if (flash == ent_flash_cur) {
         return;
     }
@@ -234,6 +248,17 @@ void entities_init_graphics(void) BANKED {
         set_sprite_palette((uint8_t)(e_i + 1u), 1, pal);
     }
 #if defined(__SDCC_sm83) && defined(PLATFORM_DMG)
+#ifdef PLATFORM_DUAL
+    if (gb_cgb) {                       /* bank 1, the art as it is */
+        set_sprite_data(ENT_TILE_BASE, ENT_GFX_TILES, ent_gfx_chr);
+        for (e_i = 0; e_i < 18u; e_i++) {
+            ent_pal_run[e_i] = ent_gfx_pal[e_i];
+        }
+    } else {
+        for (e_i = 0; e_i < 18u; e_i++) {
+            ent_pal_run[e_i] = ent_gfx_pal_dmg[e_i];
+        }
+#endif
     /* Two sprite palettes: some objects need other colour indexes than on the GBC.  Their colour
      * 2 is light grey now, for FUEL (user, 2026-11-02).  Enemy jets stay dark: 2 -> 3, explosion
      * included.  The balloon, on OBP1: light grey body, dark grey stripe and basket: 1 -> 2,
@@ -257,6 +282,9 @@ void entities_init_graphics(void) BANKED {
         }
         set_sprite_data((uint8_t)(ENT_TILE_BASE + e_t), 1, river_tile_pat);
     }
+#ifdef PLATFORM_DUAL
+    }
+#endif
 #else
     set_sprite_data(ENT_TILE_BASE, ENT_GFX_TILES, ent_gfx_chr);
 #endif
@@ -1696,7 +1724,11 @@ static void ent_draw_asm(void) {
         add     hl, bc
         ld      a, (hl)
         ld      (_e_cols), a
+#ifdef PLATFORM_DUAL
+        ld      hl, #_ent_pal_run
+#else
         ld      hl, #_ent_gfx_pal
+#endif
         add     hl, bc
         ld      a, (hl)
         ld      (_e_prop), a
@@ -1879,7 +1911,7 @@ static void ent_draw(void) {
                   e_type < ENT_AUX_TANK) ? S_FLIPX : 0u;
     }
     e_cols = ent_gfx_cols[e_src];
-    e_prop = (uint8_t)(ent_gfx_pal[e_src] | e_flip);
+    e_prop = (uint8_t)(ENT_GFX_PAL[e_src] | e_flip);
     e_rows = ent_gfx_rows[e_src];
     e_y = ent_y[e_i];
     if (e_type == ENT_AUX_BALLOON) {

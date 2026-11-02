@@ -40,7 +40,10 @@ uint8_t hud_game;
 uint8_t hud_bridge;
 uint8_t hud_blink;
 
-#ifdef PLATFORM_DMG
+#ifdef PLATFORM_DUAL
+static uint8_t ht_base;             /* 0 on a GBC (bank 1), DMG_HUD_TILE_BASE on a DMG (bank 0) */
+#define HT_BASE         ht_base
+#elif defined(PLATFORM_DMG)
 #define HT_BASE         DMG_HUD_TILE_BASE
 #else
 #define HT_BASE         0u
@@ -55,10 +58,14 @@ uint8_t hud_blink;
 #define HT_HI_H         (HT_BASE + 24u)     /* idle: white HI and high score (ink in both planes = colour 3) */
 #define HT_HI_I         (HT_BASE + 25u)
 #ifdef PLATFORM_DMG
-#define HT_WDIGIT       HT_DIGIT
 #define HT_COUNT        26u
 typedef char hud_dmg_ids_fit[(DMG_HUD_TILE_BASE + HT_COUNT == DMG_SPRITE_SPILL &&
                               TILE_RIVER_BASE + TILE_RIVER_COUNT == DMG_HUD_TILE_BASE) ? 1 : -1];
+#endif
+#ifdef PLATFORM_DUAL
+#define HT_WDIGIT       ((uint8_t)(gb_cgb ? (HT_BASE + 26u) : HT_DIGIT))   /* a DMG: the digits are white */
+#elif defined(PLATFORM_DMG)
+#define HT_WDIGIT       HT_DIGIT
 #else
 #define HT_WDIGIT       (HT_BASE + 26u)     /* 10 tiles: 26..35 */
 #define HT_COUNT        36u
@@ -84,7 +91,7 @@ typedef char hud_dmg_ids_fit[(DMG_HUD_TILE_BASE + HT_COUNT == DMG_SPRITE_SPILL &
 #define HUD_F_COL       (HUD_BAR_COL + HUD_BAR_CELLS)
 #define HUD_MAX_PLANES  6u
 
-#ifndef PLATFORM_DMG
+#ifdef GB_HAS_CGB
 static const palette_color_t hud_palette[4] = {
     RGB(0, 0, 0), RGB(10, 10, 10), RGB(31, 28, 6), RGB(31, 31, 31)
 };
@@ -128,7 +135,9 @@ static void hud_glyph_tile(uint8_t id, uint8_t glyph) {
     const uint8_t *src = atari_charset + (uint16_t)glyph * 8u;
 
     for (hu_i = 0; hu_i < 8u; hu_i++) {
-#ifdef PLATFORM_DMG
+#ifdef PLATFORM_DUAL
+        hud_tile[hu_i * 2u] = gb_cgb ? 0u : src[hu_i];
+#elif defined(PLATFORM_DMG)
         hud_tile[hu_i * 2u] = src[hu_i];
 #else
         hud_tile[hu_i * 2u] = 0u;
@@ -163,7 +172,9 @@ static void hud_bar_tile(uint8_t id, uint8_t px) {
             p0 = 0u;
             p1 = 0u;
         } else {
-#ifdef PLATFORM_DMG
+#ifdef PLATFORM_DUAL
+            p0 = gb_cgb ? grey : 0xFFu; /* colour 1 where grey, colour 2 (GBC) or 3 (DMG) where filled */
+#elif defined(PLATFORM_DMG)
             p0 = 0xFFu;                 /* colour 1 where grey, colour 3 where filled */
 #else
             p0 = grey;                  /* colour 1 where grey, colour 2 where filled */
@@ -180,11 +191,16 @@ static void hud_bar_tile(uint8_t id, uint8_t px) {
 void hud_gbc_init(void) {
     uint8_t i;
 
-#ifndef PLATFORM_DMG
-    set_bkg_palette(HUD_PAL_MAIN, 1, hud_palette);
-    hud_warn_shown = 0xFFu;             /* force the first palette write */
+#ifdef PLATFORM_DUAL
+    ht_base = gb_cgb ? 0u : DMG_HUD_TILE_BASE;
+#endif
+#ifdef GB_HAS_CGB
+    if (gb_cgb) {
+        set_bkg_palette(HUD_PAL_MAIN, 1, hud_palette);
+        hud_warn_shown = 0xFFu;         /* force the first palette write */
 
-    VBK_REG = 1;
+        VBK_REG = 1;
+    }
 #endif
     for (i = 0; i < 16u; i++) {
         hud_tile[i] = 0u;
@@ -202,22 +218,24 @@ void hud_gbc_init(void) {
     hud_glyph_tile(HT_B, GLYPH_A + 1u);
     hud_white_tile(HT_HI_H, GLYPH_A + 7u);
     hud_white_tile(HT_HI_I, GLYPH_A + 8u);
-#ifndef PLATFORM_DMG
-    for (i = 0; i < 10u; i++) {
-        hud_white_tile((uint8_t)(HT_WDIGIT + i), (uint8_t)(GLYPH_0 + i));
-    }
+#ifdef GB_HAS_CGB
+    if (gb_cgb) {
+        for (i = 0; i < 10u; i++) {
+            hud_white_tile((uint8_t)(HT_WDIGIT + i), (uint8_t)(GLYPH_0 + i));
+        }
 
-    /* Attribute bytes of the window map ($9C00): bank 1 tiles, palette 1. */
-    for (i = 0; i < HUD_COLS; i++) {
-        set_win_tile_xy(i, 0, (uint8_t)(HUD_ATTR | ((i >= HUD_BRIDGE_COL) ? HUD_PAL_TEXT : HUD_PAL_MAIN)));
-        set_win_tile_xy(i, 1, (uint8_t)(HUD_ATTR | HUD_PAL_MAIN));
+        /* Attribute bytes of the window map ($9C00): bank 1 tiles, palette 1. */
+        for (i = 0; i < HUD_COLS; i++) {
+            set_win_tile_xy(i, 0, (uint8_t)(HUD_ATTR | ((i >= HUD_BRIDGE_COL) ? HUD_PAL_TEXT : HUD_PAL_MAIN)));
+            set_win_tile_xy(i, 1, (uint8_t)(HUD_ATTR | HUD_PAL_MAIN));
+        }
+        set_win_tile_xy(HUD_E_COL, 1, (uint8_t)(HUD_ATTR | HUD_PAL_E));
+        for (i = 0; i < HUD_BAR_CELLS; i++) {
+            set_win_tile_xy((uint8_t)(HUD_BAR_COL + i), 1, (uint8_t)(HUD_ATTR | HUD_PAL_BAR));
+        }
+        set_win_tile_xy(HUD_F_COL, 1, (uint8_t)(HUD_ATTR | HUD_PAL_TEXT));
+        VBK_REG = 0;
     }
-    set_win_tile_xy(HUD_E_COL, 1, (uint8_t)(HUD_ATTR | HUD_PAL_E));
-    for (i = 0; i < HUD_BAR_CELLS; i++) {
-        set_win_tile_xy((uint8_t)(HUD_BAR_COL + i), 1, (uint8_t)(HUD_ATTR | HUD_PAL_BAR));
-    }
-    set_win_tile_xy(HUD_F_COL, 1, (uint8_t)(HUD_ATTR | HUD_PAL_TEXT));
-    VBK_REG = 0;
 #endif
 
     for (i = 0; i < HUD_CELLS; i++) {
@@ -306,18 +324,23 @@ void hud_update(void) BANKED {
     hud_want[HUD_BRIDGE_COL + 2u] = (uint8_t)(HT_DIGIT + hud_bridge % 10u);
 
 #ifdef PLATFORM_DMG
-    if (sound_warn_on != 0u) {
-        hud_want[HUD_COLS + HUD_E_COL] = HT_BLANK;
-        hud_want[HUD_COLS + HUD_F_COL] = HT_BLANK;
+    if (!gb_cgb) {
+        if (sound_warn_on != 0u) {
+            hud_want[HUD_COLS + HUD_E_COL] = HT_BLANK;
+            hud_want[HUD_COLS + HUD_F_COL] = HT_BLANK;
+        }
     }
-#else
-    /* Colours follow the low-fuel note: red gauge while it sounds. */
-    cell = (sound_warn_on != 0u) ? 1u : 0u;
-    if (cell != hud_warn_shown) {
-        hud_warn_shown = cell;
-        set_bkg_palette(HUD_PAL_TEXT, 1, hud_pal_text[cell]);
-        set_bkg_palette(HUD_PAL_E, 1, hud_pal_e[cell]);
-        set_bkg_palette(HUD_PAL_BAR, 1, hud_pal_bar[cell]);
+#endif
+#ifdef GB_HAS_CGB
+    if (gb_cgb) {
+        /* Colours follow the low-fuel note: red gauge while it sounds. */
+        cell = (sound_warn_on != 0u) ? 1u : 0u;
+        if (cell != hud_warn_shown) {
+            hud_warn_shown = cell;
+            set_bkg_palette(HUD_PAL_TEXT, 1, hud_pal_text[cell]);
+            set_bkg_palette(HUD_PAL_E, 1, hud_pal_e[cell]);
+            set_bkg_palette(HUD_PAL_BAR, 1, hud_pal_bar[cell]);
+        }
     }
 #endif
 
