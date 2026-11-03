@@ -6,11 +6,11 @@ Older lists: `archive/gbc/BUGS&FEATS.md`, `archive/nes/BUGS&FEATS.md`.
 # BUGS
 - [~] On nes shots sometimes do not destroy enemy and pass through it (fix: NES shot now steps and tests once per elapsed frame like GBC, so multi-frame passes no longer jump over the 6 px hit box)
 - [~] DMG road color palette modification (fixed: on a DMG the road's grey is dark grey and its centre line white; `river_road_paint`, `!gb_cgb` only; GBC unchanged)
-- [ ] Tank shots destroy other enemies as well as the plane (investigated, no code change: no port path lets the shell hurt an enemy, `entities_hit_shot` skips tank/shell and only the jet test reads the shell; the Atari itself does kill objects of type >= 8 with the swelling fireball, `$A4C1-$A4D9`, no score. Needs a repro from the user: which enemy, which build)
 - [~] Tank clips behind the bridge on level transition - only on DMG (fixed: a DMG ranks overlapping sprites by X, so the bridge tile left of the tank painted over it; `dmg_tank_hide` in `src/gbc/main.c` hides that one bridge tile per pass while they overlap, DMG only, GBC unchanged)
 
 
 # FEATURES
+- [~] **Tank shell destroys other objects, as in the Atari** (user wants it; `ent_shell_kills` in `src/entities.c`, `$A4C1-$A4D9`: the swelling fireball turns any helicopter, balloon, ship, bridge or fuel depot it touches into an explosion with the kill sound, no score; the enemy jet is spared)
 - [x] **One ROM for both GBC and DMG** (user, 2026-11-02), `.\build_gbc.ps1` -> `roms/river_raid.gb`, header `$80`. Waiting for the user's playtest in both modes (checklist in `HANDOFF.md`). Decisions and numbers: `PLAN_DMG.md` "Dual ROM".
 - [x] **Exact river on DMG** (`PLAN_DMG.md`). `roms/river_raid_dmg.gb`, delay queue and shared tiles, no art cut. The user's playtest, 2026-11-02: "absolutely flawless", every checklist item passes. Not merged; that is the user's call.
 - [x] **DMG colours, user's request after that playtest:** FUEL in dark and light grey; balloon light grey with a dark grey stripe and basket. Enemy jets stay dark. Confirmed by the user, 2026-11-02.

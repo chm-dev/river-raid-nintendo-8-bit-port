@@ -1366,6 +1366,48 @@ static void ent_missile_tick(void) {
     }
 }
 
+/* $A4C1-$A4D9: the swelling fireball of slot e_i ($50 >= $11) destroys any
+ * object that is not the enemy jet or an explosion (type >= 8: helicopters,
+ * balloon, ship, bridge, fuel): type 2, sound $17, no score.  The Atari takes
+ * the P0/P3 collision flag; here the fireball's box against the object box,
+ * one object per pass.  Slots after e_i are not scrolled yet this pass.
+ * Scratch: e_slot, e_l, e_r, e_t, e_w, e_px, e_c, e_type. */
+static void ent_shell_kills(void) {
+    if (ent_y[e_i] >= ENT_CULL_Y) {
+        return;
+    }
+    e_slot = (uint8_t)(((ent_aux[e_i] - SHELL_FLY_FRAMES) >> 3) << 2);
+    e_l = (uint8_t)(ent_x[e_i] + shell_box[e_slot]);
+    e_r = (uint8_t)(ent_y[e_i] + shell_box[(uint8_t)(e_slot + 2u)]);
+    for (e_t = 0; e_t < MAX_ENTITIES; e_t++) {
+        e_type = ent_type[e_t];
+        if (e_type <= ENT_AUX_JET || e_type > ENT_AUX_FUEL) {
+            continue;
+        }
+        e_w = ent_y[e_t];
+        if (e_t > e_i) {
+            e_w = (uint8_t)(e_w + river_scrolled);
+        }
+        if ((uint8_t)(e_w - e_r) >= (uint8_t)(shell_box[(uint8_t)(e_slot + 3u)] - shell_box[(uint8_t)(e_slot + 2u)]) &&
+            (uint8_t)(e_r - e_w) >= ent_gfx_rows[e_type]) {
+            continue;
+        }
+        e_px = ent_x[e_t];
+        if ((uint8_t)(e_px - e_l) >= shell_box[(uint8_t)(e_slot + 1u)] &&
+            (uint8_t)(e_l - e_px) >= ent_width(e_type)) {
+            continue;
+        }
+        e_c = e_i;
+        e_i = e_t;
+        ent_explode();
+        e_i = e_c;
+        if (player_state != PLAYER_STATE_ATTRACT) {
+            sound_play_explosion();
+        }
+        return;
+    }
+}
+
 /* Sprite frame of the tank / shell in slot e_i (tiles per frame: 2). */
 static uint8_t ent_special_frame(void) {
     e_c = ent_aux[e_i];
@@ -2134,6 +2176,9 @@ void entities_update(void) BANKED {
                 }
                 if (ent_type[e_i] == ENTITY_NONE) {
                     continue;
+                }
+                if (ent_type[e_i] == ENT_AUX_SHELL && ent_aux[e_i] >= SHELL_FLY_FRAMES) {
+                    ent_shell_kills();
                 }
             }
         } else if (e_type <= ENT_AUX_EXPLODE_LAST) {
