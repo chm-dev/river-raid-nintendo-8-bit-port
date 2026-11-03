@@ -213,6 +213,7 @@ void entities_clear(void) BANKED {
         ent_aux[e_i] = 0;
     }
     entity_count = 0;
+    ent_scrolled = 0;                       /* a new river follows: its start scroll-in begins */
     sp_hold = 0;
     bridge_x = 0;
     msl_dx = 0;
@@ -920,12 +921,13 @@ void entities_row(void) BANKED {
 
         ent_y[e_i] = (dy < 0) ? 0u : (uint8_t)dy;
     }
-    /* Game start: the river is still scrolling in and will stop after
-     * ENT_WAIT_ROWS rows.  An object that would end up inside the clearance
+    /* River start (game, respawn or attract; position based, the jet and
+     * ent_hold play no part): the river is still scrolling in and a game's
+     * would stop after ENT_WAIT_ROWS rows.  An object that would end up inside the clearance
      * zone above the jet is never created, so it cannot be seen sliding there
      * and vanishing when the jet appears (entities_clear_near is only the
      * safety net for a misjudged prediction). */
-    if (ent_hold && ent_scrolled < ENT_WAIT_ROWS &&
+    if (ent_scrolled < ENT_WAIT_ROWS &&
         (uint16_t)ent_y[e_i] + (ENT_WAIT_ROWS - ent_scrolled) + e_rows + ENT_START_CLEARANCE >
         (uint16_t)PLAYER_START_Y) {
         ent_type[e_i] = ENTITY_NONE;
@@ -2228,7 +2230,7 @@ void entities_update(void) BANKED {
     }
 
     ent_frame = (uint8_t)(ent_frame + game_ticks);
-    if (ent_hold) {
+    if (ent_scrolled < ENT_WAIT_ROWS) {     /* counts from every river start, jet or not */
         ent_scrolled += river_scrolled;
     }
     river_scrolled = 0;                    /* consumed: every entity moved by it above */

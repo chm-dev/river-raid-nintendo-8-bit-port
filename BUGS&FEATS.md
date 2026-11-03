@@ -6,7 +6,8 @@ Older lists: `archive/gbc/BUGS&FEATS.md`, `archive/nes/BUGS&FEATS.md`.
 # BUGS
 - [~] On nes shots sometimes do not destroy enemy and pass through it (fix: NES shot now steps and tests once per elapsed frame like GBC, so multi-frame passes no longer jump over the 6 px hit box)
 - [~] DMG road color palette modification (fixed: on a DMG the road's grey is dark grey and its centre line white; `river_road_paint`, `!gb_cgb` only; GBC unchanged)
-- [~] Tank clips behind the bridge on level transition - only on DMG (fixed: a DMG ranks overlapping sprites by X, so the bridge tile left of the tank painted over it; `dmg_tank_hide` in `src/gbc/main.c` now draws that bridge tile from a scratch sprite tile (hardware ids 124..127) with the tank's opaque pixels cut out, no hole in the bridge; DMG only, GBC unchanged; waits for the user's playtest)
+- [x] Tank clips behind the bridge on level transition - only on DMG (confirmed by the user, "All tested fine"; fixed: a DMG ranks overlapping sprites by X, so the bridge tile left of the tank painted over it; `dmg_tank_hide` in `src/gbc/main.c` now draws that bridge tile from a scratch sprite tile (hardware ids 124..127) with the tank's opaque pixels cut out, no hole in the bridge; DMG only, GBC unchanged; )
+- [~] Objects near the start point were removed only when the jet appeared, so attract mode (and a river restarted from the menu) still showed them (fixed: the "never create an object that would end up within `ENT_START_CLEARANCE` of the start point" test in `entities_row` no longer depends on `ent_hold`; `ent_scrolled` is reset in `entities_clear` and counts after every river start, jet or not; same rule in play; waits for the user's playtest)
 
 
 # FEATURES
