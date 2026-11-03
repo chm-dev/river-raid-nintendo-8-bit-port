@@ -4,8 +4,6 @@ The purpose of this project is to port **River Raid** (1983, Activision) from th
 
 The game logic and the procedural river come from a reverse-engineered Atari binary (disassembly, live captures in an Atari emulator); no Atari source code is used. All ports are written in C with GBDK-2020 (SDCC), with hand-written assembly where it pays. NES and Game Boy share one source tree.
 
-Current state and plans: `HANDOFF.md`, `PLAN_DMG.md`. Earlier project documents are in `archive/nes/` and `archive/gbc/`.
-
 Project was created with heavy AI assistance. Mainly by DeepSeek V4.1 Flash and Sonnet 5.5 with Opuse 5.5 as an advisor.
 
 ---
