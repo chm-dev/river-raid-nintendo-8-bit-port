@@ -5,7 +5,7 @@ Older lists: `archive/gbc/BUGS&FEATS.md`, `archive/nes/BUGS&FEATS.md`.
 
 # BUGS
 - [~] On nes shots sometimes do not destroy enemy and pass through it (fix: NES shot now steps and tests once per elapsed frame like GBC, so multi-frame passes no longer jump over the 6 px hit box)
-- [ ] DMG road color palette modification
+- [~] DMG road color palette modification (fixed: on a DMG the road's grey is dark grey and its centre line white; `river_road_paint`, `!gb_cgb` only; GBC unchanged)
 - [ ] Tank shots destroy other enemies as well as the plane
 - [ ] Tank clips behind the bridge on level transition - only on DMG
 

@@ -3196,6 +3196,24 @@ static void river_road_paint(void) {
 
     if (river_road_left <= 16u) {
         v = river_road_profile[river_road_left];
+#ifdef PLATFORM_DMG
+        /* DMG mode (no per-row palette): road grey = colour 2 (dark grey), centre line = colour 3
+         * (white), so the road differs from the land (colour 1).  Not on a GBC. */
+        if (!gb_cgb) {
+            for (i = 0; i < 48u; i++) {
+                b = river_raw_row[i];
+                m = (uint8_t)(b & 0x55u & (uint8_t)~(b >> 1));
+                if (v == 0u) {
+                    b &= (uint8_t)~m;
+                } else if (v == 1u) {
+                    b = (uint8_t)((b & ~m) | (uint8_t)(m << 1));
+                } else {
+                    b |= (uint8_t)(m << 1);
+                }
+                river_raw_row[i] = b;
+            }
+        } else
+#endif
         if (v != 1u) {
             for (i = 0; i < 48u; i++) {
                 b = river_raw_row[i];
