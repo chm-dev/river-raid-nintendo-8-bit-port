@@ -10,7 +10,7 @@ Project was created with heavy AI assistance. Mainly by DeepSeek V4.1 Flash and 
 
 ## NES
 
-<img src="readme/nes.webp" width="480" alt="NES gameplay">
+<img src="readme/nes.webp" width="320" alt="NES gameplay">
 
 - **Biggest challenge:** the original draws the river with the Atari's per-scanline playfield; the NES has only 2 KB of RAM (a few bytes were left free) and a fixed pattern-table budget, so every river row is rebuilt as exact 8x8 tiles in a CHR cache.
 - Atari behaviour (enemies, fuel, bridges, scoring, sound) was recovered by reverse engineering and verified against live Atari captures, not guessed.
@@ -20,7 +20,7 @@ Project was created with heavy AI assistance. Mainly by DeepSeek V4.1 Flash and 
 
 ## Game Boy Color
 
-<img src="readme/gbc.webp" width="480" alt="GBC gameplay">
+<img src="readme/gbc.webp" width="320" alt="GBC gameplay">
 
 - **Biggest challenge:** the exact river on a small screen and a Z80-like CPU — the game keeps the Atari/NES coordinates for logic, and only drawing goes through a camera that converts them to the 160x144 display.
 - Same exact-tile approach as the NES: a cache of exact river blocks, no fixed edge atlas, with the tile data uploaded just in time.
@@ -30,7 +30,7 @@ Project was created with heavy AI assistance. Mainly by DeepSeek V4.1 Flash and 
 
 ## Game Boy (DMG)
 
-<img src="readme/dmg.webp" width="480" alt="DMG gameplay">
+<img src="readme/dmg.webp" width="320" alt="DMG gameplay">
 
 - **Biggest challenge:** the same exact river with no colour, **one VRAM bank (384 tiles) and a single-speed CPU** — the GBC budget of ~260 river tiles plus sprites and HUD simply did not fit.
 - Solved by uploading each row 32 px above the view (delay queue), sharing identical sprite tiles across groups and trimming the HUD to 26 tiles; the exact river now needs 206 tiles.
