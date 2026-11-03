@@ -444,10 +444,10 @@ static void player_update_shot(void) {
             return;
         }
     } else {
-#ifdef __SDCC_sm83
-        /* 30 Hz logic: step and test once per elapsed frame, as the Atari's
-         * per-frame missile does.  One 12 px jump tested only at its end
-         * detects an enemy up to 6 px late. */
+        /* Step and test once per elapsed frame, as the Atari's per-frame
+         * missile does.  One multi-frame jump (12+ px, NES passes can span
+         * 2..4 frames) tested only at its end skips past a 6 px hit box and
+         * the shot flies through the enemy. */
         for (pl_t = pl_ticks; pl_t != 0u; pl_t--) {
             if (player.shot_y < (uint8_t)(HUD_SPLIT_SCANLINE + PLAYER_SHOT_SPEED + 6u)) {
                 player_kill_shot();
@@ -458,17 +458,6 @@ static void player_update_shot(void) {
                 return;
             }
         }
-#else
-        pl_row = (uint8_t)(PLAYER_SHOT_SPEED * pl_ticks);
-        if (player.shot_y < (uint8_t)(HUD_SPLIT_SCANLINE + pl_row + 6u)) {
-            player_kill_shot();
-            return;
-        }
-        player.shot_y = (uint8_t)(player.shot_y - pl_row);
-        if (player_test_shot()) {
-            return;
-        }
-#endif
     }
     /* The 1 px bar sits at column 3 of its tile.  The jet's nose is column 4 of its
      * tile (player.x + 4) and shot_x = player.x + 3 is the 2 px hit box's left edge,
