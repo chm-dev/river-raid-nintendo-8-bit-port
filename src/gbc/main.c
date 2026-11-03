@@ -431,6 +431,52 @@ static void oam_camera_core(void) {
     __endasm;
 }
 
+#ifdef PLATFORM_DMG
+/* An original Game Boy ranks overlapping sprites by X (the smaller X wins, OAM order only breaks
+ * a tie); a Game Boy Color in colour mode ranks by OAM order, which is what puts the bridge tank
+ * (slots 2, 3) in front of the bridge.  So on a DMG a bridge tile just left of the tank paints
+ * over its left part.  While the tank overlaps such a tile, hide that tile for this pass (only
+ * the hardware copy: the logic y is restored after the translation).  Bridge sprite tiles are
+ * logic ids 102..113 (ENT_TILE_BASE + ent_gfx_first[14], 12 tiles; entities.c). */
+#define DMG_BRIDGE_TILE_FIRST   102u
+#define DMG_BRIDGE_TILES        12u
+#define DMG_HIDE_MAX            6u
+static uint8_t dmg_hid_n;
+static uint8_t dmg_hid_i[DMG_HIDE_MAX];
+static uint8_t dmg_hid_y[DMG_HIDE_MAX];
+static uint8_t dmg_tank_s, dmg_tank_i, dmg_tank_x, dmg_tank_y;
+
+static void dmg_tank_hide(void) {
+    dmg_hid_n = 0u;
+    for (dmg_tank_s = 2u; dmg_tank_s <= 3u; dmg_tank_s++) {
+        dmg_tank_y = gbc_logic_oam[dmg_tank_s].y;
+        if (dmg_tank_y >= ENT_CULL_Y) {
+            continue;
+        }
+        dmg_tank_x = gbc_logic_oam[dmg_tank_s].x;
+        for (dmg_tank_i = 7u; dmg_tank_i < ent_oam_used && dmg_hid_n < DMG_HIDE_MAX; dmg_tank_i++) {
+            if ((uint8_t)(gbc_logic_oam[dmg_tank_i].tile - DMG_BRIDGE_TILE_FIRST) >= DMG_BRIDGE_TILES ||
+                (uint8_t)(dmg_tank_x - gbc_logic_oam[dmg_tank_i].x - 1u) >= 7u ||      /* 0 < dx < 8 */
+                (uint8_t)(dmg_tank_y - gbc_logic_oam[dmg_tank_i].y + 7u) >= 15u ||     /* |dy| < 8 */
+                gbc_logic_oam[dmg_tank_i].y >= ENT_CULL_Y) {
+                continue;
+            }
+            dmg_hid_i[dmg_hid_n] = dmg_tank_i;
+            dmg_hid_y[dmg_hid_n] = gbc_logic_oam[dmg_tank_i].y;
+            dmg_hid_n++;
+            gbc_logic_oam[dmg_tank_i].y = 240u;
+        }
+    }
+}
+
+static void dmg_tank_restore(void) {
+    while (dmg_hid_n != 0u) {
+        dmg_hid_n--;
+        gbc_logic_oam[dmg_hid_i[dmg_hid_n]].y = dmg_hid_y[dmg_hid_n];
+    }
+}
+#endif
+
 /* The common case (no pause menu): same output as oam_camera_slow, walking the
  * arrays by pointer.  The per-slot work is what costs here (64 slots, most of
  * them empty), so index arithmetic and the pause test stay out of the loop. */
@@ -448,7 +494,17 @@ static void oam_camera(void) {
     /* Outside the pause menu only slots below ent_oam_used and the shot are live. */
     oam_cam_s = (const uint8_t *)gbc_logic_oam;
     oam_cam_n = ent_oam_used;
+#ifdef PLATFORM_DMG
+    if (!gb_cgb) {
+        dmg_tank_hide();
+    }
+#endif
     oam_camera_core();
+#ifdef PLATFORM_DMG
+    if (!gb_cgb) {
+        dmg_tank_restore();
+    }
+#endif
     if ((uint8_t)(uint16_t)oam_cam_d != 160u) {
         oam_cam_s = (const uint8_t *)&gbc_logic_oam[OAM_SHOT_SLOT];
         oam_cam_n = 1u;

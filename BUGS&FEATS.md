@@ -7,7 +7,7 @@ Older lists: `archive/gbc/BUGS&FEATS.md`, `archive/nes/BUGS&FEATS.md`.
 - [~] On nes shots sometimes do not destroy enemy and pass through it (fix: NES shot now steps and tests once per elapsed frame like GBC, so multi-frame passes no longer jump over the 6 px hit box)
 - [~] DMG road color palette modification (fixed: on a DMG the road's grey is dark grey and its centre line white; `river_road_paint`, `!gb_cgb` only; GBC unchanged)
 - [ ] Tank shots destroy other enemies as well as the plane (investigated, no code change: no port path lets the shell hurt an enemy, `entities_hit_shot` skips tank/shell and only the jet test reads the shell; the Atari itself does kill objects of type >= 8 with the swelling fireball, `$A4C1-$A4D9`, no score. Needs a repro from the user: which enemy, which build)
-- [ ] Tank clips behind the bridge on level transition - only on DMG
+- [~] Tank clips behind the bridge on level transition - only on DMG (fixed: a DMG ranks overlapping sprites by X, so the bridge tile left of the tank painted over it; `dmg_tank_hide` in `src/gbc/main.c` hides that one bridge tile per pass while they overlap, DMG only, GBC unchanged)
 
 
 # FEATURES
