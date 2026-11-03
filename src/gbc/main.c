@@ -265,12 +265,18 @@ static uint8_t oam_cam_filled = 40u;  /* hardware slots last written on the back
 static uint8_t oam_cam_filled2 = 40u; /* ... on the page being shown */
 static volatile uint8_t pub_scx, pub_scy;
 
+#ifdef PLATFORM_DMG
+static void dmg_scr_publish(void);
+#endif
 /* The pass is finished: show it at the next VBlank. */
 static void publish_pass(void) {
     __critical {
         pub_scx = camera_x;
         pub_scy = (uint8_t)(playfield_scroll_y + (GBC_VIEW_TOP_SCANLINE - PLAYFIELD_SCANLINE));
         _shadow_OAM_base = (uint8_t)((uint16_t)oam_back >> 8);
+#ifdef PLATFORM_DMG
+        dmg_scr_publish();
+#endif
     }
     oam_back = (oam_back == oam_page2) ? (uint8_t *)shadow_OAM : oam_page2;
     oam_cam_x = oam_cam_filled;
@@ -435,41 +441,383 @@ static void oam_camera_core(void) {
 /* An original Game Boy ranks overlapping sprites by X (the smaller X wins, OAM order only breaks
  * a tie); a Game Boy Color in colour mode ranks by OAM order, which is what puts the bridge tank
  * (slots 2, 3) in front of the bridge.  So on a DMG a bridge tile just left of the tank paints
- * over its left part.  While the tank overlaps such a tile, hide that tile for this pass (only
- * the hardware copy: the logic y is restored after the translation).  Bridge sprite tiles are
- * logic ids 102..113 (ENT_TILE_BASE + ent_gfx_first[14], 12 tiles; entities.c). */
+ * over its left part.  While the tank's opaque pixels are under such a tile's, that tile is drawn
+ * from a scratch copy with the tank's pixels cut out (dmg_tank_hide), in one of DMG_SCR_MAX spare
+ * sprite tiles (hardware ids 124..127, logic ids 60..63, which no sprite uses).  The copy is built
+ * in WRAM into the back one of two buffers; publish_pass hands the finished buffer to the VBlank
+ * handler, which writes it to VRAM together with the OAM DMA, so the tile and the OAM entry that
+ * uses it always change on the same frame.  Over the budget (more than DMG_SCR_MAX tiles, or no
+ * spare ids) the tile is hidden for the pass instead (only the hardware copy: the logic tile / y is
+ * restored after the translation).  Bridge sprite tiles are logic ids 102..113
+ * (ENT_TILE_BASE + ent_gfx_first[14], 12 tiles; entities.c). */
 #define DMG_BRIDGE_TILE_FIRST   102u
 #define DMG_BRIDGE_TILES        12u
 #define DMG_HIDE_MAX            6u
+#define DMG_SCR_MAX             4u
+#define DMG_SCR_LOGIC           60u
+#define DMG_SCR_HW              124u
 static uint8_t dmg_hid_n;
 static uint8_t dmg_hid_i[DMG_HIDE_MAX];
 static uint8_t dmg_hid_y[DMG_HIDE_MAX];
-static uint8_t dmg_tank_s, dmg_tank_i, dmg_tank_x, dmg_tank_y;
+static uint8_t dmg_tank_k;
+static uint8_t dmg_scr_buf[2][DMG_SCR_MAX * 16u];
+static uint8_t dmg_scr_back;                /* the buffer being built */
+static uint8_t dmg_scr_n;                   /* its scratch tiles */
+static uint8_t dmg_scr_max;                 /* DMG_SCR_MAX, or 0 when the spare ids are taken */
+static uint8_t dmg_scr_i[DMG_SCR_MAX];      /* logic OAM slot using scratch tile k */
+static uint8_t dmg_scr_t[DMG_SCR_MAX];      /* its own tile */
+static const uint8_t * volatile dmg_scr_pub;    /* the buffer the VBlank handler copies */
+static volatile uint8_t dmg_scr_pub_n;
+typedef char dmg_scr_ids[(DMG_SCR_LOGIC + DMG_SCR_MAX == SPRITE_TILE_BASE && DMG_SCR_HW + DMG_SCR_MAX == 128u) ? 1 : -1];
+
+/* VBlank: the scratch tiles to VRAM, 4 bytes per pass of the loop (16 M-cycles per 4 bytes at
+ * 7 per byte: 3 tiles are ~340 M-cycles, after the OAM DMA and the handlers; VBlank has 1140).
+ * VRAM is open from the start of line 144 (mode 1) and this runs from the VBlank interrupt;
+ * the main loop's interrupts-off stretches are at most 16 M-cycles (river_vram_copy_asm) and
+ * a __critical in publish_pass is a few stores.  Own function: rule 4. */
+static void dmg_scr_copy(void) {
+    __asm
+        ld      a, (_dmg_scr_pub_n)
+        or      a, a
+        ret     Z
+        add     a, a
+        add     a, a                ; 4 loops of 4 bytes per tile
+        ld      b, a
+        ld      a, (_dmg_scr_pub)
+        ld      e, a
+        ld      a, (_dmg_scr_pub + 1)
+        ld      d, a
+        ld      hl, #0x87C0         ; DMG_SCR_HW * 16 + $8000
+    1$:
+        ld      a, (de)
+        inc     de
+        ld      (hl+), a
+        ld      a, (de)
+        inc     de
+        ld      (hl+), a
+        ld      a, (de)
+        inc     de
+        ld      (hl+), a
+        ld      a, (de)
+        inc     de
+        ld      (hl+), a
+        dec     b
+        jr      NZ, 1$
+    __endasm;
+}
+
+/* The tank is logic slots 2 (top cell) and 3 (8 rows below), 8 wide; its tiles are logic ids
+ * 204..215.  dmg_mp holds the tank's opaque pixels per row, shifted right by dx so they line up with
+ * a bridge tile dx pixels to the left of the tank: tank rows 0..15 are at dmg_mp[7..22], zeros around,
+ * so a bridge tile row outside the tank reads 0.  Only a bridge tile with an opaque pixel under an
+ * opaque tank pixel is cut; the others stay as they are.  All art is in WRAM (copied at boot by
+ * entities_dmg_art: no ROM bank switch here).  The loops are assembly (SDCC's code for them cost
+ * 20-30k profiler units a pass); the C is glue on file-scope statics (rule 3), and the logic OAM
+ * is volatile, so only the candidates' slots are touched through it. */
+#define DMG_TANK_TILE_FIRST     204u
+#define DMG_CAND_MAX            6u
+static uint8_t dmg_art_bridge[DMG_ART_BRIDGE_TILES * 16u];
+static uint8_t dmg_art_tank[DMG_ART_TANK_TILES * 8u];
+static uint8_t dmg_mp[30];
+static uint8_t dmg_mk[3] = { 0xFEu, 0u, 0u };       /* what dmg_mp was built for: tank tile index of both cells, dx */
+static uint8_t dmg_s_tx, dmg_s_top7;                /* scan input: the tank's X, its top row - 7 */
+static uint8_t dmg_c_n;                             /* scan output: candidates (slot, y, dx) in dmg_c */
+static uint8_t dmg_c[DMG_CAND_MAX * 3u];
+static uint8_t *dmg_c_p;
+static uint8_t dmg_mc_idx, dmg_mc_dx;               /* mask input: tank tile index (FF: none), dx; output at dmg_mc_dst */
+static uint8_t *dmg_mc_dst;
+static const uint8_t *dmg_k_a, *dmg_k_q;            /* cut input: bridge tile art, mask rows; output at dmg_k_d */
+static uint8_t *dmg_k_d;
+static uint8_t dmg_k_hit;
+static uint8_t dmg_h_i, dmg_h_slot, dmg_h_y, dmg_h_dx, dmg_h_rel, dmg_h_tile, dmg_h_i2, dmg_h_i3;
+typedef char dmg_scan_consts[(DMG_BRIDGE_TILE_FIRST == 102u && DMG_BRIDGE_TILES == 12u && ENT_CULL_Y == 240u &&
+                              DMG_CAND_MAX == 6u && DMG_ART_TANK_TILES * 8u < 256u) ? 1 : -1];
+
+/* Slots 7.. of the logic OAM whose tile is a bridge tile with 0 < dx < 8 and y < ENT_CULL_Y:
+ * dmg_c = slot, y, dx for each (at most DMG_CAND_MAX).  ~12 M-cycles a slot. */
+static void dmg_scan_asm(void) {
+    __asm
+        xor     a, a
+        ld      (_dmg_c_n), a
+        ld      a, #<_dmg_c
+        ld      (_dmg_c_p), a
+        ld      a, #>_dmg_c
+        ld      (_dmg_c_p + 1), a
+        ld      a, (_ent_oam_used)
+        sub     a, #7
+        ret     Z
+        ret     C
+        ld      b, a                ; slots left
+        ld      c, #7               ; slot
+        ld      hl, #(_gbc_logic_oam + 28)
+    1$:
+        ld      a, (hl+)            ; y
+        ld      d, a
+        ld      a, (hl+)            ; x
+        ld      e, a
+        ld      a, (hl)             ; tile
+        sub     a, #102             ; DMG_BRIDGE_TILE_FIRST
+        cp      a, #12
+        jr      NC, 3$
+        ld      a, (_dmg_s_tx)
+        sub     a, e
+        ld      e, a                ; dx
+        dec     a
+        cp      a, #7
+        jr      NC, 3$
+        ld      a, d
+        cp      a, #240             ; ENT_CULL_Y
+        jr      NC, 3$
+        ld      a, (_dmg_c_n)
+        cp      a, #6
+        jr      NC, 3$
+        inc     a
+        ld      (_dmg_c_n), a
+        push    hl
+        ld      a, (_dmg_c_p)
+        ld      l, a
+        ld      a, (_dmg_c_p + 1)
+        ld      h, a
+        ld      (hl), c
+        inc     hl
+        ld      (hl), d
+        inc     hl
+        ld      (hl), e
+        inc     hl
+        ld      a, l
+        ld      (_dmg_c_p), a
+        ld      a, h
+        ld      (_dmg_c_p + 1), a
+        pop     hl
+    3$:
+        inc     hl
+        inc     hl
+        inc     c
+        dec     b
+        jr      NZ, 1$
+    __endasm;
+}
+
+/* dmg_mc_dst[0..7] = the opaque rows of tank tile dmg_mc_idx, each shifted right by dmg_mc_dx
+ * (1..7); zeros for FF. */
+static void dmg_mask_asm(void) {
+    __asm
+        ld      a, (_dmg_mc_dst)
+        ld      l, a
+        ld      a, (_dmg_mc_dst + 1)
+        ld      h, a
+        ld      b, #8
+        ld      a, (_dmg_mc_idx)
+        inc     a
+        jr      Z, 5$
+        dec     a
+        add     a, a
+        add     a, a
+        add     a, a                ; * 8: the tile index is below 12
+        ld      e, a
+        ld      d, #0
+        push    hl
+        ld      hl, #_dmg_art_tank
+        add     hl, de
+        ld      d, h
+        ld      e, l
+        pop     hl
+        ld      a, (_dmg_mc_dx)
+        ld      c, a
+    2$:
+        ld      a, (de)
+        inc     de
+        push    bc
+        ld      b, c
+    3$:
+        srl     a
+        dec     b
+        jr      NZ, 3$
+        pop     bc
+        ld      (hl+), a
+        dec     b
+        jr      NZ, 2$
+        ret
+    5$:
+        xor     a, a
+    6$:
+        ld      (hl+), a
+        dec     b
+        jr      NZ, 6$
+    __endasm;
+}
+
+/* dmg_k_hit = 1 if any of the 8 rows of the bridge tile at dmg_k_a has an opaque pixel under
+ * the mask row at dmg_k_q. */
+static void dmg_hit_asm(void) {
+    __asm
+        ld      a, (_dmg_k_a)
+        ld      e, a
+        ld      a, (_dmg_k_a + 1)
+        ld      d, a
+        ld      a, (_dmg_k_q)
+        ld      l, a
+        ld      a, (_dmg_k_q + 1)
+        ld      h, a
+        ld      b, #8
+    1$:
+        ld      a, (de)
+        inc     de
+        ld      c, a
+        ld      a, (de)
+        inc     de
+        or      a, c
+        and     a, (hl)
+        jr      NZ, 2$
+        inc     hl
+        dec     b
+        jr      NZ, 1$
+        xor     a, a
+        ld      (_dmg_k_hit), a
+        ret
+    2$:
+        ld      a, #1
+        ld      (_dmg_k_hit), a
+    __endasm;
+}
+
+/* The bridge tile at dmg_k_a to dmg_k_d (16 bytes), minus the pixels of the 8 mask rows at dmg_k_q. */
+static void dmg_cut_asm(void) {
+    __asm
+        ld      a, (_dmg_k_a)
+        ld      e, a
+        ld      a, (_dmg_k_a + 1)
+        ld      d, a
+        ld      a, (_dmg_k_d)
+        ld      l, a
+        ld      a, (_dmg_k_d + 1)
+        ld      h, a
+        ld      b, #16
+    1$:
+        ld      a, (de)
+        inc     de
+        ld      (hl+), a
+        dec     b
+        jr      NZ, 1$
+        ld      a, (_dmg_k_d)
+        ld      l, a
+        ld      a, (_dmg_k_d + 1)
+        ld      h, a
+        ld      a, (_dmg_k_q)
+        ld      e, a
+        ld      a, (_dmg_k_q + 1)
+        ld      d, a
+        ld      b, #8
+    2$:
+        ld      a, (de)
+        inc     de
+        cpl
+        ld      c, a
+        ld      a, (hl)
+        and     a, c
+        ld      (hl+), a
+        ld      a, (hl)
+        and     a, c
+        ld      (hl+), a
+        dec     b
+        jr      NZ, 2$
+    __endasm;
+}
 
 static void dmg_tank_hide(void) {
+    const uint8_t *raw = (const uint8_t *)gbc_logic_oam;
+    uint8_t y2, y3, top;
+
     dmg_hid_n = 0u;
-    for (dmg_tank_s = 2u; dmg_tank_s <= 3u; dmg_tank_s++) {
-        dmg_tank_y = gbc_logic_oam[dmg_tank_s].y;
-        if (dmg_tank_y >= ENT_CULL_Y) {
+    dmg_scr_n = 0u;
+    y2 = raw[2u * 4u];
+    y3 = raw[3u * 4u];
+    dmg_h_i2 = dmg_h_i3 = 0xFFu;
+    if (y2 < ENT_CULL_Y) {
+        top = y2;
+        dmg_s_tx = raw[2u * 4u + 1u];
+        dmg_h_i2 = (uint8_t)(raw[2u * 4u + 2u] - DMG_TANK_TILE_FIRST);
+        if (y3 < ENT_CULL_Y) {
+            if (y3 != (uint8_t)(y2 + 8u)) {
+                return;
+            }
+            dmg_h_i3 = (uint8_t)(raw[3u * 4u + 2u] - DMG_TANK_TILE_FIRST);
+        }
+    } else if (y3 < ENT_CULL_Y) {
+        top = (uint8_t)(y3 - 8u);
+        dmg_s_tx = raw[3u * 4u + 1u];
+        dmg_h_i3 = (uint8_t)(raw[3u * 4u + 2u] - DMG_TANK_TILE_FIRST);
+    } else {
+        return;
+    }
+    if (dmg_h_i2 >= DMG_ART_TANK_TILES) {
+        dmg_h_i2 = 0xFFu;
+    }
+    if (dmg_h_i3 >= DMG_ART_TANK_TILES) {
+        dmg_h_i3 = 0xFFu;
+    }
+    if (dmg_h_i2 == 0xFFu && dmg_h_i3 == 0xFFu) {       /* not the bridge tank */
+        return;
+    }
+    dmg_s_top7 = (uint8_t)(top - 7u);
+    dmg_scan_asm();
+    for (dmg_h_i = 0u; dmg_h_i < dmg_c_n; dmg_h_i++) {
+        dmg_h_slot = dmg_c[(uint8_t)(dmg_h_i * 3u)];
+        dmg_h_y = dmg_c[(uint8_t)(dmg_h_i * 3u + 1u)];
+        dmg_h_dx = dmg_c[(uint8_t)(dmg_h_i * 3u + 2u)];
+        dmg_h_rel = (uint8_t)(dmg_h_y - dmg_s_top7);    /* tile row 0 over tank row rel - 7; 0..22 overlap */
+        if (dmg_h_rel >= 23u) {
             continue;
         }
-        dmg_tank_x = gbc_logic_oam[dmg_tank_s].x;
-        for (dmg_tank_i = 7u; dmg_tank_i < ent_oam_used && dmg_hid_n < DMG_HIDE_MAX; dmg_tank_i++) {
-            if ((uint8_t)(gbc_logic_oam[dmg_tank_i].tile - DMG_BRIDGE_TILE_FIRST) >= DMG_BRIDGE_TILES ||
-                (uint8_t)(dmg_tank_x - gbc_logic_oam[dmg_tank_i].x - 1u) >= 7u ||      /* 0 < dx < 8 */
-                (uint8_t)(dmg_tank_y - gbc_logic_oam[dmg_tank_i].y + 7u) >= 15u ||     /* |dy| < 8 */
-                gbc_logic_oam[dmg_tank_i].y >= ENT_CULL_Y) {
-                continue;
-            }
-            dmg_hid_i[dmg_hid_n] = dmg_tank_i;
-            dmg_hid_y[dmg_hid_n] = gbc_logic_oam[dmg_tank_i].y;
-            dmg_hid_n++;
-            gbc_logic_oam[dmg_tank_i].y = 240u;
+        if (dmg_mk[2] != dmg_h_dx || dmg_mk[0] != dmg_h_i2 || dmg_mk[1] != dmg_h_i3) {
+            dmg_mk[0] = dmg_h_i2;
+            dmg_mk[1] = dmg_h_i3;
+            dmg_mk[2] = dmg_h_dx;
+            dmg_mc_dx = dmg_h_dx;
+            dmg_mc_idx = dmg_h_i2;
+            dmg_mc_dst = &dmg_mp[7];
+            dmg_mask_asm();
+            dmg_mc_idx = dmg_h_i3;
+            dmg_mc_dst = &dmg_mp[15];
+            dmg_mask_asm();
         }
+        dmg_h_tile = gbc_logic_oam[dmg_h_slot].tile;
+        dmg_k_a = &dmg_art_bridge[(uint8_t)((uint8_t)(dmg_h_tile - DMG_BRIDGE_TILE_FIRST) << 4)];
+        dmg_k_q = &dmg_mp[dmg_h_rel];
+        dmg_hit_asm();
+        if (dmg_k_hit == 0u) {                  /* no pixel under the tank's: nothing to cut */
+            continue;
+        }
+        if (dmg_scr_n >= dmg_scr_max || (gbc_logic_oam[dmg_h_slot].prop & 0x60u) != 0u) {
+            if (dmg_hid_n < DMG_HIDE_MAX) {     /* no scratch tile (or a flipped tile): hide it */
+                dmg_hid_i[dmg_hid_n] = dmg_h_slot;
+                dmg_hid_y[dmg_hid_n] = dmg_h_y;
+                dmg_hid_n++;
+                gbc_logic_oam[dmg_h_slot].y = 240u;
+            }
+            continue;
+        }
+        dmg_k_d = &dmg_scr_buf[dmg_scr_back][(uint8_t)(dmg_scr_n << 4)];
+        dmg_cut_asm();
+        dmg_scr_i[dmg_scr_n] = dmg_h_slot;
+        dmg_scr_t[dmg_scr_n] = dmg_h_tile;
+        gbc_logic_oam[dmg_h_slot].tile = (uint8_t)(DMG_SCR_LOGIC + dmg_scr_n);
+        dmg_scr_n++;
     }
 }
 
+/* In publish_pass's critical section, with the OAM page: the tiles that page uses. */
+static void dmg_scr_publish(void) {
+    dmg_scr_pub = dmg_scr_buf[dmg_scr_back];
+    dmg_scr_pub_n = dmg_scr_n;
+    dmg_scr_back ^= 1u;
+    dmg_scr_n = 0u;
+}
+
 static void dmg_tank_restore(void) {
+    for (dmg_tank_k = 0u; dmg_tank_k < dmg_scr_n; dmg_tank_k++) {
+        gbc_logic_oam[dmg_scr_i[dmg_tank_k]].tile = dmg_scr_t[dmg_tank_k];
+    }
     while (dmg_hid_n != 0u) {
         dmg_hid_n--;
         gbc_logic_oam[dmg_hid_i[dmg_hid_n]].y = dmg_hid_y[dmg_hid_n];
@@ -539,6 +887,9 @@ static void hud_show_sprites_isr(void) {
     LCDC_REG |= LCDCF_OBJON;
     SCX_REG = pub_scx;
     SCY_REG = pub_scy;
+#ifdef PLATFORM_DMG
+    dmg_scr_copy();
+#endif
 }
 
 void main(void) {
@@ -609,6 +960,15 @@ void main(void) {
     player_init();
     entities_init();
     collision_init();
+#ifdef PLATFORM_DMG
+    if (!gb_cgb) {                      /* the bridge/tank scratch tiles: the sprite ids past the shared tiles */
+        entities_dmg_art(dmg_art_bridge, dmg_art_tank);
+        dmg_scr_max = (dmg_spr_used <= DMG_SCR_HW) ? DMG_SCR_MAX : 0u;
+        for (i = 0u; i < DMG_SCR_MAX; i++) {
+            dmg_tile_map[DMG_SCR_LOGIC + i] = (uint8_t)(DMG_SCR_HW + i);
+        }
+    }
+#endif
     camera_follow();
     oam_camera();
     publish_pass();

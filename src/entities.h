@@ -101,6 +101,14 @@ void entities_clear_near(uint8_t jet_y) BANKED;
 /* 1 while a new game's river scrolls in: entities stand still (see entities.c). */
 extern uint8_t ent_hold;
 extern uint8_t ent_paused;              /* pause menu: entities_update() does nothing */
+#ifdef PLATFORM_DMG
+/* DMG bridge/tank priority (gbc/main.c): copy the art it needs to WRAM at boot, so the pass does
+ * not switch ROM banks: the 12 bridge tiles (192 bytes, as in ROM) and, for each of the 12 tank
+ * tiles, its 8 opaque-pixel row masks (colour index != 0). */
+#define DMG_ART_BRIDGE_TILES    12u
+#define DMG_ART_TANK_TILES      12u
+void entities_dmg_art(uint8_t *bridge, uint8_t *tank) BANKED;
+#endif
 #ifdef PROF_OAMCHECK
 void ent_check_redraw(uint8_t top) BANKED;
 void ent_check_oam(uint8_t what) BANKED;

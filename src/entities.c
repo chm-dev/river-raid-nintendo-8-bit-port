@@ -302,6 +302,24 @@ uint8_t entities_shot_tile(void) BANKED {
     return (uint8_t)(ENT_TILE_BASE + ENT_GFX_SHOT);
 }
 
+#ifdef PLATFORM_DMG
+/* See entities.h.  The bridge and tank art is not modified on the DMG, so the ROM tiles are the
+ * pixels in VRAM.  Opaque = colour index != 0 (either plane). */
+void entities_dmg_art(uint8_t *bridge, uint8_t *tank) BANKED {
+    const uint8_t *t;
+    uint8_t i;
+
+    t = &ent_gfx_chr[(uint16_t)ent_gfx_first[ENT_AUX_BRIDGE] * 16u];
+    for (i = 0u; i < DMG_ART_BRIDGE_TILES * 16u; i++) {
+        bridge[i] = t[i];
+    }
+    t = &ent_gfx_chr[(uint16_t)ent_gfx_first[ENT_AUX_TANK] * 16u];
+    for (i = 0u; i < DMG_ART_TANK_TILES * 8u; i++, t += 2) {
+        tank[i] = (uint8_t)(t[0] | t[1]);
+    }
+}
+#endif
+
 static uint8_t bcd_carry;
 static uint8_t score_tenk;      /* saved ten-thousands nibble: file scope, see AGENTS.md rule 3 */
 
