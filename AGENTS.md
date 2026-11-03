@@ -3,18 +3,18 @@
 Stable rules only. Status lives in `HANDOFF.md`.
 
 ## Project status
-- **Read `HANDOFF.md` first.** Short and current: where we are, next steps, decisions not to reopen, where to look.
-- **`PLAN_DMG.md` is the working plan:** the exact river on DMG (branch `dmg-exact`), tasks, tile budget, gates.
-- **`PLAN_2600.md` is the parked 2600 river mode** and holds the performance findings of Stage 1b. The decision text and risks are in `docs/PROPOSAL_2600_RIVER_MODE.md`.
+- **The project is done** (user, 2026-11-03): the NES, GBC and DMG ports are finished. Only occasional bug fixes and small new features may come. There is no active plan and no root `HANDOFF.md`.
+- **The DMG work is merged** into `main` (`dmg-exact` has no commits ahead). One ROM, `roms/river_raid.gb`, runs as GBC or DMG, chosen at boot (`gb_cgb`, `src/platform.h`).
+- **DMG history is in `archive/dmg/`:** `HANDOFF.md` (last state, build hashes, per-step checks, test recipes, scripting traps, decisions not to reopen), `PLAN_DMG.md`, `PLAN_2600.md` (parked 2600 river mode, Stage 1b performance findings), `PROGRESS.md`, `BUGS&FEATS.md`. **Read `archive/dmg/HANDOFF.md` before touching the GB code**: its "Per-step check", "Running a test" and "Decisions not to reopen" sections still apply. The 2600 decision text is in `docs/PROPOSAL_2600_RIVER_MODE.md`.
 - **GBC history is in `archive/gbc/`** (old HANDOFF, PROGRESS, GBC_PORT_PLAN, BUGS&FEATS: architecture, baseline measurements, build and emulator notes). Open it only when needed.
-- **`PROGRESS.md` is append-only history.** Do not read it whole. Grep it for a keyword and read only the matching `### date - title` entry.
-- **NES history is in `archive/nes/`** (old HANDOFF, PROGRESS, PORTING_PLAN, BUGS&FEATS, Mesen notes, NES AGENTS and LESSONS). Open it only when a specific NES reference is needed. Nothing there is required reading.
-- Keep `HANDOFF.md` ~100 lines (up to ~150 when the extra text is clearly valuable). Trim before adding.
+- **NES history is in `archive/nes/`** (old HANDOFF, PROGRESS, PORTING_PLAN, BUGS&FEATS, Mesen notes, NES AGENTS and LESSONS). Open it only when a specific NES reference is needed.
+- **Archived `PROGRESS.md` files are append-only history.** Do not read them whole. Grep for a keyword and read only the matching `### date - title` entry.
+- **New work:** if the user reports a bug or asks for a feature, track it in a new root `BUGS&FEATS.md` (create it when first needed). Do not recreate `HANDOFF.md` or plans unless the user asks.
 
 ## Project overview
 Port of the Atari 8-bit **River Raid** (`xex/River Raid (1983)(Activision)(US)[a3].xex`) to the **Game Boy Color** in C, using GBDK-2020 v4.5.0 (`./gbdk`).
-- **GBC is the finished target; DMG is an experiment** (`PLAN_DMG.md`, user, 2026-11-02). Keep the GBC ROMs working and DMG code behind its own flag.
-- **Prototype first:** reuse the existing C code and decide on a playtest go/no-go after milestone 2. Hand-written sm83 is allowed where it pays (user, 2026-11-02); keep the C version as the reference for a byte-for-byte check (`build_gbc.ps1 -OamCheck`, `-RiverCheck`).
+- **GBC and DMG are both finished** (dual ROM, see Project status). A fix must keep both modes and the NES build working; DMG code stays behind its own flag.
+- **Hand-written sm83 is allowed where it pays** (user, 2026-11-02); keep the C version as the reference for a byte-for-byte check (`build_gbc.ps1 -OamCheck`, `-RiverCheck`).
 - **Atari ground truth:** `docs/ATARI_RE_SPEC.md`, `docs/atari_disasm_*.txt`, `assets/atari/extracted/`. The shared river generator is `tools/river_model.py` and `src/river.c`.
 - **Logic coordinates:** game logic stays in NES-era coordinates (X = Atari HPOS, Y = NES scanlines 30..239). Only drawing goes through a camera.
 - **HUD art:** do not redraw. `assets/atari/extracted/charset.bin` holds the original art; see `assets/atari/extracted/README.md` → "HUD glyph inventory".
@@ -56,7 +56,7 @@ Gearboy is the GB/GBC emulator with an MCP server. The folder is gitignored and 
 
 ## Workflow
 - **The user runs the playtests.** Build the ROM, then hand over a checklist. Do not drive the emulator to confirm gameplay fixes.
-- **Bugs and features:** `BUGS&FEATS.md`. Mark a fix `[~]` until the user confirms it in play, then `[x]`.
-- **Branches:** work on `main`. Branch only for risky or throwaway experiments, never a scratch copy of the tree. The 2600 river mode and the Stage 1b performance work are on `river-2600`, kept as the fallback; the DMG experiment is on `dmg-exact`. Merging either to `main` is the user's call.
-- **Never push.** Commit locally and stop; the user pushes to origin themselves. Do not run `git push`.
-- **Session end:** the steps are at the bottom of `HANDOFF.md`. Do not edit `AGENTS.md` for status.
+- **Bugs and features:** root `BUGS&FEATS.md` (see Project status). Mark a fix `[~]` until the user confirms it in play, then `[x]`.
+- **Branches:** work on `main`. Branch only for risky or throwaway experiments, never a scratch copy of the tree. `river-2600` (2600 river mode, Stage 1b performance work) is kept as a fallback. Merging any branch to `main` is the user's call.
+- **No commits (user, 2026-11-03).** Do not run `git commit`, `git add`, `git push`, or any other command that changes git history or the index. Leave changes in the working tree; the user commits and pushes themselves. This replaces the older "commit locally" rule.
+- **Session end:** summarize what changed and which ROMs or hashes were rebuilt. Do not edit `AGENTS.md` for status.
