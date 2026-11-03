@@ -1,4 +1,4 @@
-# River Raid — Nintendo 8-bit ports
+# River Raid - Nintendo 8-bit ports
 
 The purpose of this project is to port **River Raid** (1983, Activision) from the **Atari XL/XE 8-bit computers** to Nintendo's 8-bit platforms - **NES, Game Boy (DMG) and Game Boy Color (GBC)** - as faithfully as possible.
 
