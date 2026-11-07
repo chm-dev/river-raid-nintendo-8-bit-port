@@ -143,8 +143,12 @@ static uint8_t pl_hi_idx;               /* start level hud_hi_bcd belongs to */
 static uint8_t pl_sel;                  /* start level picked in the menu (river_variant once built) */
 static uint8_t pl_frozen;               /* menu changed: the old river stands still until pl_wait_end */
 static uint16_t pl_wait_end;            /* sys_time at which the picked level's river starts */
-static uint8_t pl_nocol;                /* debug start (SELECT): the jet cannot crash */
+static uint8_t pl_nocol;                /* debug start (A + B + START): the jet cannot crash */
 static uint8_t pl_rep;                  /* attract: frames until Up/Down repeats */
+#ifdef PLATFORM_DMG
+static uint8_t pl_sel_now;              /* SELECT: the DMG palette switch, in every state */
+static uint8_t pl_sel_prev;
+#endif
 static uint8_t pause_sel;               /* 0 = RESUME, 1 = EXIT */
 static uint8_t pause_from;              /* state to return to: PLAY, or READY (jet not yet moving) */
 static uint8_t pl_new;
@@ -178,6 +182,9 @@ void player_init(void) BANKED {
     player_timer = 0;
     player_fuel_tick = 0;
     player_prev_pad = 0xFFu;            /* a button held at boot is not a press */
+#ifdef PLATFORM_DMG
+    pl_sel_prev = 0xFFu;                /* nor a SELECT held at boot */
+#endif
     river_speed = 1u;                   /* the boot attract scrolls at the cruise speed */
     river_vel = RIVER_VEL_CRUISE;
 #ifdef TWO_PLAYER
@@ -205,9 +212,13 @@ static void player_load_shape(uint8_t first_tile, uint8_t shape) {
     const uint8_t *src = atari_player_shape + (uint16_t)shape * ATARI_PLAYER_SHAPE_LEN;
     uint8_t i;
 
-    /* 1bpp source -> 2bpp with the set pixels in plane 0 (sprite colour 1).
-     * The library build does not ship set_sprite_1bpp_data(), so expand it
-     * here rather than relying on the missing symbol. */
+    /* 1bpp source -> 2bpp with the set pixels in plane 0 (sprite colour 1, white on a DMG: see
+     * DMG_OBP0).  The library build does not ship set_sprite_1bpp_data(), so expand it here rather
+     * than relying on the missing function.
+     *
+     * Keep colour 1: DMG sprite tiles are shared at boot, and this encoding dedupes to 124 tiles,
+     * which leaves hardware ids 124..127 free for dmg_tank_hide's scratch tiles (main.c).  Colour 2
+     * (moving the jet to plane 1) costs one tile and disables that fix (dmg_spr_used 125). */
     for (i = 0; i < 8; i++) {
         player_tile_buf[i * 2] = src[i];
         player_tile_buf[i * 2 + 1] = 0x00u;
@@ -560,7 +571,8 @@ static void player_pause_enter(void) {
 
 /* Back to the attract screen on start level `variant`: a fresh river with no
  * jet, a blank scoreboard and the hi-score of that level.  The jet is gone and
- * the menu (Up/Down = start level, SELECT = debug start, START) is live. */
+ * the menu (Up/Down = start level, A + B + START = debug start) is live.  SELECT
+ * (any state) switches the DMG palette. */
 static void player_attract(uint8_t variant) {
     pl_hi[pl_hi_idx][0] = hud_hi_bcd[0];
     pl_hi[pl_hi_idx][1] = hud_hi_bcd[1];
@@ -604,11 +616,16 @@ static void player_attract(uint8_t variant) {
     player_state = PLAYER_STATE_ATTRACT;
 }
 
-/* RESUME / EXIT: Up, Down and SELECT move the cursor, START or A confirms. */
+/* RESUME / EXIT: Up and Down move the cursor (SELECT too on the NES), START or A confirms.  On a
+ * GB SELECT is the DMG palette switch, so it no longer moves the cursor. */
 static void player_pause_update(void) {
     pl_new = (uint8_t)(pl_pad & ~player_prev_pad);
     player_prev_pad = pl_pad;
+#if defined(__SDCC_sm83)
+    if (pl_new & (J_UP | J_DOWN)) {
+#else
     if (pl_new & (J_UP | J_DOWN | J_SELECT)) {
+#endif
         pause_sel ^= 1u;
         player_pause_draw();
         sound_play_blip();
@@ -755,6 +772,16 @@ void player_update(void) BANKED {
         return;
     }
 
+#ifdef PLATFORM_DMG
+    /* SELECT switches the DMG palette in every state (attract, play, pause, dead).  The HUD tiles
+     * are rebuilt for it; the river picks the encoding up row by row.  A no-op on a GBC. */
+    pl_sel_now = joypad();
+    if ((pl_sel_now & J_SELECT) && !(pl_sel_prev & J_SELECT)) {
+        dmg_palette_toggle();
+    }
+    pl_sel_prev = pl_sel_now;
+#endif
+
     if (player_state == PLAYER_STATE_ATTRACT) {
         if (pl_frozen && (int16_t)((uint16_t)sys_time - pl_wait_end) >= 0) {
             player_attract(pl_sel);     /* idle timer out: the picked level begins ($A688) */
@@ -762,10 +789,9 @@ void player_update(void) BANKED {
         pl_pad = joypad();
         pl_new = (uint8_t)(pl_pad & ~player_prev_pad);
         player_prev_pad = pl_pad;
-        if (pl_new & (J_START | J_SELECT)) {
-            /* SELECT is the debugging start: the same game, but the jet
-             * cannot crash into anything. */
-            pl_nocol = (pl_new & J_SELECT) ? 1u : 0u;
+        if (pl_new & J_START) {
+            /* A + B held with START is the collisionless debug start on every platform. */
+            pl_nocol = ((pl_pad & (J_A | J_B)) == (J_A | J_B)) ? 1u : 0u;
             player_start_game();
         } else if (pl_new & (J_UP | J_DOWN)) {
             pl_rep = ATTRACT_REPEAT_FRAMES;

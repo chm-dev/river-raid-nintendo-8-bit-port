@@ -61,12 +61,34 @@
 #define DMG_TILE_MAP_ADDR       0xD100u /* page aligned: gbc/main.c, $D000 is the OAM page */
 #define DMG_RQ_PAT_ADDR         0xD200u /* river.c delay queue, RQ_TILES * 16 bytes */
 
-/* Colour index -> shade (0 white .. 3 black).  River: 0 outline, 1 land / road, 2 hills / road
- * line, 3 water.  The HUD shares BGP: ink is 3 on 0.  Sprite colour 0 is transparent. */
-#define DMG_BGP                 DMG_PALETTE(DMG_BLACK, DMG_LITE_GRAY, DMG_DARK_GRAY, DMG_WHITE)
-#define DMG_BGP_FLASH           DMG_PALETTE(DMG_BLACK, DMG_LITE_GRAY, DMG_DARK_GRAY, DMG_DARK_GRAY)
-#define DMG_OBP0                DMG_PALETTE(DMG_WHITE, DMG_BLACK, DMG_LITE_GRAY, DMG_DARK_GRAY)
-#define DMG_OBP1                DMG_PALETTE(DMG_WHITE, DMG_BLACK, DMG_LITE_GRAY, DMG_DARK_GRAY)
+/* Colour index -> shade (0 white .. 3 black).  Two palettes, SELECT in attract:
+ *
+ * A (default, `dmg_pal` 0): river 0 outline, 1 land, 2 hills / road grey, 3 water.  Land light
+ *   grey, water and hills dark grey.  Entry 2 is white and belongs to the HUD and the road centre
+ *   line: river.c maps the hills (value 2) to the water's value 3 (river_dmg_hills), because a DMG
+ *   cannot show water and hills in different shades and still have a white HUD.
+ * B (the original DMG palette, `dmg_pal` 1): river 0 outline, 1 land, 2 hills / road line, 3 water.
+ *   Land light grey, hills dark grey, water white, HUD white; the hills are not remapped and the
+ *   road line stays value 3.  Sprites are black/light grey/dark grey again (the player is black).
+ *
+ * Sprite colour 0 is transparent.  A: OBP0 1, 2 and 3 are white (player, shot, pause keys and the
+ * enemy jet; FUEL is on OBP1, where its white + light grey pair reads against the dark river);
+ * OBP1 1 black, 2 white, 3 light grey.  No sprite uses the river's dark grey.  B: the original
+ * black/light grey/dark grey registers (player black, enemy jet dark grey).  The bridge art is
+ * remapped 2 -> 3 in both palettes (entities.c), so in B its deck is dark grey, not the old light
+ * grey. */
+#define DMG_BGP_A               DMG_PALETTE(DMG_BLACK, DMG_LITE_GRAY, DMG_WHITE, DMG_DARK_GRAY)
+#define DMG_BGP_B               DMG_PALETTE(DMG_BLACK, DMG_LITE_GRAY, DMG_DARK_GRAY, DMG_WHITE)
+#define DMG_BGP_FLASH_A         DMG_PALETTE(DMG_BLACK, DMG_LITE_GRAY, DMG_WHITE, DMG_WHITE)
+#define DMG_BGP_FLASH_B         DMG_PALETTE(DMG_BLACK, DMG_LITE_GRAY, DMG_DARK_GRAY, DMG_DARK_GRAY)
+#define DMG_OBP0_A              DMG_PALETTE(DMG_WHITE, DMG_WHITE, DMG_WHITE, DMG_WHITE)
+#define DMG_OBP1_A              DMG_PALETTE(DMG_WHITE, DMG_BLACK, DMG_WHITE, DMG_LITE_GRAY)
+#define DMG_OBP0_B              DMG_PALETTE(DMG_WHITE, DMG_BLACK, DMG_LITE_GRAY, DMG_DARK_GRAY)
+#define DMG_OBP1_B              DMG_PALETTE(DMG_WHITE, DMG_BLACK, DMG_LITE_GRAY, DMG_DARK_GRAY)
+#define DMG_BGP                 (dmg_pal ? DMG_BGP_B : DMG_BGP_A)
+#define DMG_BGP_FLASH           (dmg_pal ? DMG_BGP_FLASH_B : DMG_BGP_FLASH_A)
+#define DMG_OBP0                (dmg_pal ? DMG_OBP0_B : DMG_OBP0_A)
+#define DMG_OBP1                (dmg_pal ? DMG_OBP1_B : DMG_OBP1_A)
 #endif
 
 #endif /* CONFIG_GBC_H */

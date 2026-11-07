@@ -18,8 +18,9 @@
  * the ones that changed; the library's VRAM and palette writes wait for STAT.
  *
  * PLATFORM_DMG: the tiles sit at DMG_HUD_TILE_BASE in the one VRAM bank and share BGP with the
- * river, so all ink is colour 3 on colour 0 and the white digits are the digits (26 tiles).  The
- * low-fuel signal is E and F going out while the note sounds.
+ * river, so all ink is colour 2 on colour 0 (DMG_BGP makes entry 2 white; the river uses 0, 1 and
+ * 3 only, so no background pixel competes with the HUD) and the white digits are the digits (26
+ * tiles).  The low-fuel signal is E and F going out while the note sounds.
  */
 #include <gb/gb.h>
 #include <gb/cgb.h>
@@ -55,7 +56,7 @@ static uint8_t ht_base;             /* 0 on a GBC (bank 1), DMG_HUD_TILE_BASE on
 #define HT_F            (HT_BASE + 21u)
 #define HT_PLANE        (HT_BASE + 22u)
 #define HT_B            (HT_BASE + 23u)
-#define HT_HI_H         (HT_BASE + 24u)     /* idle: white HI and high score (ink in both planes = colour 3) */
+#define HT_HI_H         (HT_BASE + 24u)     /* idle: white HI and high score (ink in the white colour) */
 #define HT_HI_I         (HT_BASE + 25u)
 #ifdef PLATFORM_DMG
 #define HT_COUNT        26u
@@ -130,15 +131,15 @@ static uint8_t hu_started;
 static const uint8_t *hu_src;     /* BCD number hud_put_score draws */
 static uint8_t hu_base;            /* first digit tile: yellow or white */
 
-/* One glyph row (1bpp) into the 2bpp buffer: ink = colour 2, i.e. plane 1. */
+/* One glyph row (1bpp) into the 2bpp buffer.  GBC: colour 2 (plane 1, yellow in the GBC HUD
+ * palette).  DMG: colour 2 in palette A (plane 1) and colour 3 in palette B (both planes); both
+ * are white in their DMG_BGP. */
 static void hud_glyph_tile(uint8_t id, uint8_t glyph) {
     const uint8_t *src = atari_charset + (uint16_t)glyph * 8u;
 
     for (hu_i = 0; hu_i < 8u; hu_i++) {
-#ifdef PLATFORM_DUAL
-        hud_tile[hu_i * 2u] = gb_cgb ? 0u : src[hu_i];
-#elif defined(PLATFORM_DMG)
-        hud_tile[hu_i * 2u] = src[hu_i];
+#ifdef PLATFORM_DMG
+        hud_tile[hu_i * 2u] = dmg_pal ? src[hu_i] : 0u;
 #else
         hud_tile[hu_i * 2u] = 0u;
 #endif
@@ -147,18 +148,25 @@ static void hud_glyph_tile(uint8_t id, uint8_t glyph) {
     set_bkg_data(id, 1, hud_tile);
 }
 
-/* Same glyph in colour 3 (white in palette 1), for the idle high score. */
+/* Same glyph in the HUD's white ink: colour 3 on the GBC (both planes, white in palette 1), colour
+ * 2 in palette A and colour 3 in palette B on a DMG. */
 static void hud_white_tile(uint8_t id, uint8_t glyph) {
     const uint8_t *src = atari_charset + (uint16_t)glyph * 8u;
 
     for (hu_i = 0; hu_i < 8u; hu_i++) {
+#ifdef PLATFORM_DMG
+        hud_tile[hu_i * 2u] = (gb_cgb || dmg_pal) ? src[hu_i] : 0u;
+#else
         hud_tile[hu_i * 2u] = src[hu_i];
+#endif
         hud_tile[hu_i * 2u + 1u] = src[hu_i];
     }
     set_bkg_data(id, 1, hud_tile);
 }
 
-/* Gauge cell with `px` pixels filled from the left (yellow), the rest grey. */
+/* Gauge cell with `px` pixels filled from the left, the rest grey.  GBC and DMG palette A: colour
+ * 2 where filled, colour 1 where grey; DMG palette B: colour 3 where filled, colour 1 where grey
+ * (entry 3 is its white). */
 static void hud_bar_tile(uint8_t id, uint8_t px) {
     uint8_t row, filled, grey, p0, p1;
 
@@ -172,12 +180,10 @@ static void hud_bar_tile(uint8_t id, uint8_t px) {
             p0 = 0u;
             p1 = 0u;
         } else {
-#ifdef PLATFORM_DUAL
-            p0 = gb_cgb ? grey : 0xFFu; /* colour 1 where grey, colour 2 (GBC) or 3 (DMG) where filled */
-#elif defined(PLATFORM_DMG)
-            p0 = 0xFFu;                 /* colour 1 where grey, colour 3 where filled */
+#ifdef PLATFORM_DMG
+            p0 = (!gb_cgb && dmg_pal) ? 0xFFu : grey;
 #else
-            p0 = grey;                  /* colour 1 where grey, colour 2 where filled */
+            p0 = grey;
 #endif
             p1 = filled;
         }
@@ -187,21 +193,10 @@ static void hud_bar_tile(uint8_t id, uint8_t px) {
     set_bkg_data(id, 1, hud_tile);
 }
 
-/* Boot-time setup; call with the display off. */
-void hud_gbc_init(void) {
+/* All HUD tiles, for the current machine and DMG palette.  Also called from hud_dmg_palette(). */
+static void hud_build_tiles(void) {
     uint8_t i;
 
-#ifdef PLATFORM_DUAL
-    ht_base = gb_cgb ? 0u : DMG_HUD_TILE_BASE;
-#endif
-#ifdef GB_HAS_CGB
-    if (gb_cgb) {
-        set_bkg_palette(HUD_PAL_MAIN, 1, hud_palette);
-        hud_warn_shown = 0xFFu;         /* force the first palette write */
-
-        VBK_REG = 1;
-    }
-#endif
     for (i = 0; i < 16u; i++) {
         hud_tile[i] = 0u;
     }
@@ -223,7 +218,28 @@ void hud_gbc_init(void) {
         for (i = 0; i < 10u; i++) {
             hud_white_tile((uint8_t)(HT_WDIGIT + i), (uint8_t)(GLYPH_0 + i));
         }
+    }
+#endif
+}
 
+/* Boot-time setup; call with the display off. */
+void hud_gbc_init(void) {
+    uint8_t i;
+
+#ifdef PLATFORM_DUAL
+    ht_base = gb_cgb ? 0u : DMG_HUD_TILE_BASE;
+#endif
+#ifdef GB_HAS_CGB
+    if (gb_cgb) {
+        set_bkg_palette(HUD_PAL_MAIN, 1, hud_palette);
+        hud_warn_shown = 0xFFu;         /* force the first palette write */
+
+        VBK_REG = 1;
+    }
+#endif
+    hud_build_tiles();
+#ifdef GB_HAS_CGB
+    if (gb_cgb) {
         /* Attribute bytes of the window map ($9C00): bank 1 tiles, palette 1. */
         for (i = 0; i < HUD_COLS; i++) {
             set_win_tile_xy(i, 0, (uint8_t)(HUD_ATTR | ((i >= HUD_BRIDGE_COL) ? HUD_PAL_TEXT : HUD_PAL_MAIN)));
@@ -247,6 +263,14 @@ void hud_gbc_init(void) {
     SHOW_WIN;
     hud_update();
 }
+
+#ifdef PLATFORM_DMG
+/* SELECT in attract: rebuild the tiles for the other DMG palette.  The display is on, so this is a
+ * brief HUD flicker; the window map already points at the same ids. */
+void hud_dmg_palette(void) {
+    hud_build_tiles();
+}
+#endif
 
 /* Number on row 0 (the score, or the high score when idle), centred in the 20 columns.  Six BCD digits, leading zeros
  * dropped (a zero score keeps one 0).  An odd digit count cannot sit exactly

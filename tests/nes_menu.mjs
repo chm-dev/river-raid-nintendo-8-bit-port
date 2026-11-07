@@ -4,10 +4,10 @@
  *
  * Boot goes straight to the attract screen (no jet, no lives).  Up/Down step the
  * Atari game number 1..8 (GAME n = 1 + 2*variant + two: start level 1/5/20/50 and
- * one/two players together), START begins, SELECT begins a debug game in which the
- * jet cannot crash.  The scoreboard's right label is HI (one player) or P2 (two).
- * In a two-player game every death hands the jet to the other player, who keeps
- * their own lives.  During play START pauses (RESUME / EXIT menu).
+ * one/two players together), START begins, A + B + START begins a debug game in
+ * which the jet cannot crash.  The scoreboard's right label is HI (one player) or
+ * P2 (two).  In a two-player game every death hands the jet to the other player,
+ * who keeps their own lives.  During play START pauses (RESUME / EXIT menu).
  *
  * Run:  node tests/nes_menu.mjs [rom] [noi]
  */
@@ -152,7 +152,7 @@ try {
     check(m.lives === 2, 'player 1 is back with their remaining 2 lives', JSON.stringify(m));
     check((await u8('hud_cur')) === 0, 'hud_cur follows the active player', '');
 
-    // ---- SELECT debug start and the pause menu (fresh one-player game) ----
+    // ---- A + B + START debug start and the pause menu (fresh one-player game) ----
     const oamY = async slot => (await readBytes(S('shadow_OAM') + slot * 4, 1))[0];
     const startOnePlayer = async button => {
         await callTool('mesen_load_rom', { filepath: rom });
@@ -171,12 +171,12 @@ try {
     m = await menu();
     check(m.lives < 3, 'START game: flying into the bank costs a life', JSON.stringify(m));
 
-    // SELECT: the same game, but the jet cannot crash into terrain.
-    await startOnePlayer('Select');
+    // The same game, but A + B held with START: the jet cannot crash into terrain.
+    await startOnePlayer('A,B,Start');
     await setU8('player_invuln', 0);
     await press('Left'); await step(360); await press('');
     m = await menu();
-    check(m.lives === 3, 'SELECT game: the bank does not hurt (still 3 lives)', JSON.stringify(m));
+    check(m.lives === 3, 'A+B+START game: the bank does not hurt (still 3 lives)', JSON.stringify(m));
 
     // Pause: START freezes the world and shows RESUME / EXIT.
     await startOnePlayer('Start');

@@ -97,6 +97,7 @@ def build(data, rows, m):
 
 
 BALLOON = 12
+FUEL = 15
 for a in range(7, 16):
     rows = yoff[a] + 1
     rows_of[a] = rows
@@ -227,9 +228,12 @@ out_c += carr("const uint8_t ent_exp_first[18]", exp_first)
 out_c += carr("const uint8_t ent_gfx_count[18]", count)
 out_c += carr("const uint8_t ent_gfx_rows[18]", rows_of)
 out_c += carr("const uint8_t ent_gfx_cols[18]", cols_of)
-# DMG: the balloon is on OBP1 whole, as OBP0's colour 1 is the jet's black (see entities_init_graphics).
+# DMG: the balloon and the FUEL depot are on OBP1 whole.  OBP0's colour 3 is the enemy jet's
+# white in palette A and its colour 1 is the player's (see entities_init_graphics), so neither can
+# hold the FUEL depot's white + dark grey pair.
 dmg_pal = list(pal)
 dmg_pal[BALLOON] = 1
+dmg_pal[FUEL] = 1
 # PLATFORM_DMG alone: the DMG ROM's table.  PLATFORM_DUAL: the GBC table plus ent_gfx_pal_dmg.
 out_c += "#if defined(PLATFORM_DMG) && !defined(PLATFORM_DUAL)\n" + carr("const uint8_t ent_gfx_pal[18]", dmg_pal) + "#else\n"
 out_c += carr("const uint8_t ent_gfx_pal[18]", pal)

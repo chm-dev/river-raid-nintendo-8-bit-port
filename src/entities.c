@@ -263,10 +263,13 @@ void entities_init_graphics(void) BANKED {
             ent_pal_run[e_i] = ent_gfx_pal_dmg[e_i];
         }
 #endif
-    /* Two sprite palettes: some objects need other colour indexes than on the GBC.  Their colour
-     * 2 is light grey now, for FUEL (user, 2026-11-02).  Enemy jets stay dark: 2 -> 3, explosion
-     * included.  The balloon, on OBP1: light grey body, dark grey stripe and basket: 1 -> 2,
-     * 2 -> 3.  Runs before the tiles are shared; river_tile_pat is free at boot. */
+    /* Two sprite palettes: some objects need other colour indexes than on the GBC.  Colour 2 is
+     * white (DMG_OBP0/1); colour 3 is white on OBP0 in palette A (enemy jets) and dark grey on
+     * OBP1 (helicopter and ship bodies).  No sprite uses the river's dark grey.  Enemy jets stay
+     * dark in palette B (2 -> 3) and so does the bridge (2 -> 3: its deck was white otherwise),
+     * which also has to match dmg_art_bridge (entities_dmg_art).  The balloon and the FUEL depot are
+     * on OBP1: white/light grey body, light grey/dark grey stripe and basket: 1 -> 2, 2 -> 3.
+     * Runs before the tiles are shared; river_tile_pat is free at boot. */
     for (e_t = 0; e_t < ENT_GFX_TILES; e_t++) {
         for (e_n = 0; e_n < 16u; e_n += 2u) {
             e_l = ent_gfx_chr[(uint16_t)e_t * 16u + e_n];
@@ -276,7 +279,9 @@ void entities_init_graphics(void) BANKED {
                 river_tile_pat[e_n] = e_r;
                 river_tile_pat[e_n + 1u] = (uint8_t)(e_l | e_r);
             } else if (e_t == ent_gfx_first[7] ||
-                       (e_t >= ent_exp_first[7] && e_t < (uint8_t)(ent_exp_first[7] + 5u))) {
+                       (e_t >= ent_exp_first[7] && e_t < (uint8_t)(ent_exp_first[7] + 5u)) ||
+                       (e_t >= ent_gfx_first[ENT_AUX_BRIDGE] &&
+                        e_t < (uint8_t)(ent_gfx_first[ENT_AUX_BRIDGE] + ent_gfx_count[ENT_AUX_BRIDGE]))) {
                 river_tile_pat[e_n] = (uint8_t)(e_l | e_r);
                 river_tile_pat[e_n + 1u] = e_r;
             } else {
@@ -304,15 +309,17 @@ uint8_t entities_shot_tile(void) BANKED {
 }
 
 #ifdef PLATFORM_DMG
-/* See entities.h.  The bridge and tank art is not modified on the DMG, so the ROM tiles are the
- * pixels in VRAM.  Opaque = colour index != 0 (either plane). */
+/* See entities.h.  The tank art is not modified on the DMG; the bridge gets the same 2 -> 3
+ * remap as its uploaded tiles (entities_init_graphics), so the scratch copy is the same picture.
+ * Opaque = colour index != 0 (either plane). */
 void entities_dmg_art(uint8_t *bridge, uint8_t *tank) BANKED {
     const uint8_t *t;
     uint8_t i;
 
     t = &ent_gfx_chr[(uint16_t)ent_gfx_first[ENT_AUX_BRIDGE] * 16u];
-    for (i = 0u; i < DMG_ART_BRIDGE_TILES * 16u; i++) {
-        bridge[i] = t[i];
+    for (i = 0u; i < DMG_ART_BRIDGE_TILES * 16u; i += 2u) {
+        bridge[i] = (uint8_t)(t[i] | t[i + 1u]);        /* colour 2 -> 3 */
+        bridge[i + 1u] = t[i + 1u];
     }
     t = &ent_gfx_chr[(uint16_t)ent_gfx_first[ENT_AUX_TANK] * 16u];
     for (i = 0u; i < DMG_ART_TANK_TILES * 8u; i++, t += 2) {

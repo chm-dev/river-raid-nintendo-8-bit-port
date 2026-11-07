@@ -37,6 +37,13 @@ extern uint8_t gb_cgb;
 void dmg_sprite_data(uint8_t first, uint8_t n, const uint8_t *src);
 #undef set_sprite_data
 #define set_sprite_data dmg_sprite_data
+
+/* Attract-mode palette: 0 = palette A (the current shades), 1 = the original DMG palette.
+ * SELECT toggles it on a DMG; dmg_palette_toggle() is a no-op on a GBC. */
+extern uint8_t dmg_pal;
+void dmg_palette_toggle(void);
+#else
+#define dmg_palette_toggle()    ((void)0)
 #endif
 
 #endif

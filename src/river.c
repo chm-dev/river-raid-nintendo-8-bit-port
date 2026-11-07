@@ -3189,6 +3189,19 @@ static const uint8_t river_road_profile[17] = {
     1, 0, 0, 1, 1, 1, 1, 1, 2, 2, 1, 1, 1, 1, 1, 0, 0
 };
 
+/* DMG: hills (raw value 2) take the water's value 3, so BGP entry 2 is free for the white HUD and
+ * road centre line (DMG_BGP).  Value 2 -> 3 sets the low bit wherever a pixel's high bit is set. */
+#ifdef PLATFORM_DMG
+static void river_dmg_hills(void) {
+    uint8_t i, b;
+
+    for (i = 0; i < 48u; i++) {
+        b = river_raw_row[i];
+        river_raw_row[i] = (uint8_t)(b | ((uint8_t)(b >> 1) & 0x55u));
+    }
+}
+#endif
+
 /* Recolour the land pixels (value 1) of the raw row just rendered, or count
  * down the rows before the road starts.  No calls inside: locals are safe. */
 static void river_road_paint(void) {
@@ -3197,18 +3210,19 @@ static void river_road_paint(void) {
     if (river_road_left <= 16u) {
         v = river_road_profile[river_road_left];
 #ifdef PLATFORM_DMG
-        /* DMG mode (no per-row palette): road grey = colour 2 (dark grey), centre line = colour 3
-         * (white), so the road differs from the land (colour 1).  Not on a GBC. */
+        /* DMG mode (no per-row palette).  Palette A: road grey = value 3 (dark grey), centre line =
+         * value 2 (white).  Original palette B: grey = value 2, line = value 3 (the old encoding).
+         * Not on a GBC. */
         if (!gb_cgb) {
             for (i = 0; i < 48u; i++) {
                 b = river_raw_row[i];
                 m = (uint8_t)(b & 0x55u & (uint8_t)~(b >> 1));
                 if (v == 0u) {
                     b &= (uint8_t)~m;
-                } else if (v == 1u) {
-                    b = (uint8_t)((b & ~m) | (uint8_t)(m << 1));
+                } else if (v == (uint8_t)(dmg_pal + 1u)) {
+                    b |= (uint8_t)(m << 1);                 /* value 3 */
                 } else {
-                    b |= (uint8_t)(m << 1);
+                    b = (uint8_t)((b & ~m) | (uint8_t)(m << 1));    /* value 2 */
                 }
                 river_raw_row[i] = b;
             }
@@ -3244,6 +3258,11 @@ static void river_generate_raw_row(void) {
     }
 
     river_step_state();
+#ifdef PLATFORM_DMG
+    if (!gb_cgb && !dmg_pal && (rg_feature || (rg_island_flags & 0x80u))) {
+        river_dmg_hills();              /* palette A: hills onto the water's BGP entry */
+    }
+#endif
 
     if (river_road_left != 0u) {
         river_road_paint();

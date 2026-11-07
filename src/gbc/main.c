@@ -52,6 +52,7 @@ volatile uint8_t playfield_scroll_y;
 volatile struct OAM_item_t gbc_logic_oam[LOGIC_OAM_SLOTS];
 
 void hud_gbc_init(void);
+void hud_dmg_palette(void);
 
 /* Read by tests through the .noi. */
 volatile uint16_t frame_counter;
@@ -93,9 +94,24 @@ uint8_t gb_cgb;                     /* 1 on a Game Boy Color; set first thing in
  * is the identity: the sprites keep their ids in VRAM bank 1. */
 uint8_t __at(DMG_TILE_MAP_ADDR) dmg_tile_map[256];
 uint8_t dmg_spr_used;               /* hardware sprite tiles allocated; read by tests */
+uint8_t dmg_pal;                    /* 0 = palette A (default), 1 = the original DMG palette */
 #ifdef PLATFORM_DUAL
 #undef set_sprite_data              /* platform.h points it at dmg_sprite_data; below it is the library's */
 #endif
+
+/* SELECT in any state: swap palette A (current) for B (the original DMG shades and sprites).  The
+ * river reads dmg_pal for the hills/road encoding and the HUD tiles are rebuilt here, so rows
+ * already on screen keep the old encoding until they scroll out.  Not on a GBC. */
+void dmg_palette_toggle(void) {
+    if (gb_cgb) {
+        return;
+    }
+    dmg_pal ^= 1u;
+    BGP_REG = DMG_BGP;
+    OBP0_REG = DMG_OBP0;
+    OBP1_REG = DMG_OBP1;
+    hud_dmg_palette();
+}
 
 /* Upload sprite tiles for the logic ids first..first + n - 1, sharing any tile whose pixels are
  * already there.  Boot only: the display is off, so VRAM can be read and written freely.  Past

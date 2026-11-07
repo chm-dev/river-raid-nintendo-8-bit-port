@@ -63,27 +63,30 @@ await c.call('debug_pause');
 const map = await wram(sym('_dmg_tile_map'), 256);
 const used = (await wram(sym('_dmg_spr_used'), 1))[0];
 const spr = await vram(0x8000, 0x1000);
-/* Colour indexes the DMG wants per object: balloon 1 -> 2, 2 -> 3; enemy jet and its explosion 2 -> 3. */
+/* Colour indexes the DMG wants per object: balloon 1 -> 2, 2 -> 3; enemy jet and its explosion
+ * 2 -> 3; bridge 2 -> 3. */
 const table = n => new RegExp(`${n}\\[18\\] = \\{([^}]*)\\}`).exec(chrSrc)[1].match(/0x[0-9A-Fa-f]{2}/g).map(h => parseInt(h, 16));
 const first = table('ent_gfx_first'), count = table('ent_gfx_count'), expFirst = table('ent_exp_first');
-const BALLOON = 12, ENEMY_JET = 7;
+const BALLOON = 12, ENEMY_JET = 7, BRIDGE = 14;
 let wrong = 0;
 for (let i = 0; i * 16 < chr.length; i++) {
     const hw = map[88 + i];
     if (hw >= 128 && hw !== 255) wrong++;
     const balloon = i >= first[BALLOON] && i < first[BALLOON] + count[BALLOON];
     const jet = i === first[ENEMY_JET] || (i >= expFirst[ENEMY_JET] && i < expFirst[ENEMY_JET] + 5);
+    const bridge = i >= first[BRIDGE] && i < first[BRIDGE] + count[BRIDGE];
     for (let l = 0; l < 8; l++) {
         for (let x = 0; x < 8; x++) {
             const px = (lo, hi) => ((lo >> x) & 1) | (((hi >> x) & 1) << 1);
             let want = px(chr[i * 16 + l * 2], chr[i * 16 + l * 2 + 1]);
             if (balloon && want) want++;
-            if (jet && want === 2) want = 3;
+            if ((jet || bridge) && want === 2) want = 3;
             if (px(spr[hw * 16 + l * 2], spr[hw * 16 + l * 2 + 1]) !== want) { wrong++; l = 8; break; }
         }
     }
 }
-/* HUD tiles: ink in both planes, ids 229.. (digits 230..239, E F plane B 249..252, HI 253 254) */
+/* HUD tiles: ink in plane 1 (colour 2, white in DMG_BGP), ids 229.. (digits 230..239, E F plane B
+ * 249..252, HI 253 254) */
 const charset = readFileSync('assets/atari/extracted/charset.bin');
 const hudWant = [[230, 80], [231, 81], [232, 82], [233, 83], [234, 84], [235, 85], [236, 86], [237, 87], [238, 88], [239, 89],
                  [249, 5], [250, 6], [251, 0x5C], [252, 2], [253, 8], [254, 9]];
@@ -92,13 +95,15 @@ for (const [id, g] of hudWant) {
     const t = await bgTile(id);
     for (let r = 0; r < 8; r++) {
         const want = charset[(g + Number(process.env.DMG_CHECK_NEG || 0)) * 8 + r];     /* DMG_CHECK_NEG=1: negative control */
-        if (t[r * 2] !== want || t[r * 2 + 1] !== want) { hudWrong++; break; }
+        if (t[r * 2] !== 0 || t[r * 2 + 1] !== want) { hudWrong++; break; }
     }
 }
 console.log(`HUD tiles not matching charset.bin: ${hudWrong} of ${hudWant.length}`);
 if (hudWrong) fail++;
-console.log(`sprite tiles allocated ${used} (budget 129), entity tiles not matching ${wrong} of ${chr.length / 16}`);
-if (used > 129 || wrong) fail++;
+/* 124 is the real cap: hardware ids 124..127 must stay free for dmg_tank_hide's scratch tiles
+ * (src/gbc/main.c).  Going over it silently brings back the tank-under-bridge bug. */
+console.log(`sprite tiles allocated ${used} (cap 124, absolute budget 129), entity tiles not matching ${wrong} of ${chr.length / 16}`);
+if (used > 124 || wrong) fail++;
 await c.call('debug_continue');
 
 /* Play */
